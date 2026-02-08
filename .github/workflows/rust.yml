@@ -28,4 +28,4 @@ jobs:
       run: ls -l target/debug/deps
     
     - name: Run tests
-      run: cp target/debug/deps/libcranium_api.so /home/runner/work/Cranium/libs; export LIBRARY_PATH="/home/runner/work/Cranium/libs:$LD_LIBRARY_PATH" cargo test --workspace --verbose --no-fail-fast --config ./test_config.toml
+      run: cp target/debug/deps/libcranium_api.so /home/runner/work/Cranium/libs; export LIBRARY_PATH="/home/runner/work/Cranium/libs:$LD_LIBRARY_PATH"; cargo test --workspace --verbose --no-fail-fast --config ./test_config.toml
