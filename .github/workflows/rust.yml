@@ -17,8 +17,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build --workspace --verbose
+      run: cargo build --workspace --all-targets --verbose
     - name: Check
       run: ls -l target/debug/deps
     - name: Run tests
-      run: cargo test --workspace --verbose
+      run: cargo test --workspace --verbose --no-fail-fast
