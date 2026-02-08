@@ -10,6 +10,8 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! update the state of the World to keep the AI decisions sane, etc.
 #![no_std]
 
-mod api;
+pub(crate) mod api;
+pub(crate) mod channels;
+pub(crate) mod heartbeat;
 
 pub use api::*;

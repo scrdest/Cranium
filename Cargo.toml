@@ -20,7 +20,7 @@ cranium-core = {version = ">=0.1, <=0.3", path = "crates/core"}
 cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "crates/bevy_plugin", optional = true}
 cranium-actionset-loader = {version = "0.3.0", path = "crates/actionset_loader", optional = true}
 cranium-test-plugin = {version = "0.3.0", path = "crates/test_plugin", optional = true}
-cranium-api = {version = "0.3.0", path = "crates/cortex_api", optional = true}
+cranium-api = {version = "0.3.0", path = "crates/cranium_api", optional = true}
 
 [dev-dependencies]
 bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["debug"]}
@@ -46,7 +46,7 @@ actionset_loader = [
 
 # Everything needed for an 'AI Server' setup of Cranium (i.e. using Cranium as a separate ECS world)
 ai_server = [
-  
+  "cranium-api"
 ]
 
 # Provides a plugin that sets up most of the basic integration for a 'Bevy-native' setup.
@@ -130,3 +130,7 @@ opt-level = 3
 [[example]]
 name = "e2e"
 path = "examples/e2e/e2e.rs"
+
+[[example]]
+name = "ai_server"
+path = "examples/ai_server/ai_server.rs"

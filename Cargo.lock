@@ -1551,8 +1551,10 @@ name = "cranium-api"
 version = "0.3.0"
 dependencies = [
  "bevy",
+ "cfg-if",
  "cranium-bevy-plugin",
  "cranium-core",
+ "crossbeam-channel",
 ]
 
 [[package]]
