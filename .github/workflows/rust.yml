@@ -28,4 +28,4 @@ jobs:
       run: ls -l target/debug/deps
     
     - name: Run tests
-      run: cp target/debug/deps/libcranium_api.so .; cargo test --workspace --verbose --no-fail-fast
+      run: cp target/debug/deps/libcranium_api.so .; ls -l .; cargo test --workspace --verbose --no-fail-fast
