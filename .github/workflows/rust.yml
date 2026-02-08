@@ -16,9 +16,16 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --workspace --all-targets --verbose
+
+    - name: Build workspace
+      run: cargo build --workspace --verbose
+    
+    # This needs to be a separate step, as normal build does NOT create the DLL/SO file.
+    - name: Build dylibs
+      run: cargo build -p cranium-api --verbose
+    
     - name: Check
       run: ls -l target/debug/deps
+    
     - name: Run tests
       run: cargo test --workspace --verbose --no-fail-fast
