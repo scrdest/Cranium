@@ -40,7 +40,10 @@ use cranium_ffi::{ApiInMsg, ApiOutMsg, FFIOption};
 
 // Bindings to the relevant functions in the DLL.
 // Note that we are NOT actually calling cranium_api's 'native' Rust methods here, we're calling the DLL!
-#[link(name = "target/debug/deps/cranium_api.dll", kind = "dylib")]
+#[cfg_attr(target_os = "windows", link(name = "target/debug/deps/cranium_api.dll", kind = "dylib"))]
+#[cfg_attr(target_os = "linux", link(name = "target/debug/deps/cranium_api.so", kind = "dylib"))]
+#[cfg_attr(target_os = "android", link(name = "target/debug/deps/cranium_api.so", kind = "dylib"))]
+#[cfg_attr(target_os = "macos", link(name = "target/debug/deps/cranium_api.dylib", kind = "dylib"))]
 unsafe extern "C" {
     safe fn cranium_create_and_autorun();
     safe fn cranium_keepalive();
