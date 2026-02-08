@@ -1527,6 +1527,7 @@ dependencies = [
  "cranium-api",
  "cranium-bevy-plugin",
  "cranium-core",
+ "cranium-ffi",
  "cranium-test-plugin",
 ]
 
@@ -1551,9 +1552,9 @@ name = "cranium-api"
 version = "0.3.0"
 dependencies = [
  "bevy",
- "cfg-if",
  "cranium-bevy-plugin",
  "cranium-core",
+ "cranium-ffi",
  "crossbeam-channel",
 ]
 
@@ -1572,6 +1573,15 @@ version = "0.3.0"
 dependencies = [
  "bevy",
  "serde",
+]
+
+[[package]]
+name = "cranium-ffi"
+version = "0.3.0"
+dependencies = [
+ "bevy",
+ "cranium-bevy-plugin",
+ "cranium-core",
 ]
 
 [[package]]

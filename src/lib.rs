@@ -33,6 +33,9 @@ pub mod prelude {
     #[cfg(feature = "actionset_loader")]
     pub use cranium_actionset_loader;
 
-    // #[cfg(feature = "ai_server")]
-    // pub use cranium_api;
+    #[cfg(any(feature = "ai_server", feature = "testing"))]
+    pub use cranium_ffi;
+
+    #[cfg(any(feature = "ai_server", feature = "testing"))]
+    pub use cranium_api;
 }

@@ -8,8 +8,8 @@ use core::{sync::atomic};
 
 use bevy::prelude::*;
 
-use cranium_core::types::{ApiInMsg, ApiOutMsg};
 use cranium_bevy_plugin::CraniumPlugin;
+use cranium_ffi::{ApiInMsg, ApiOutMsg};
 
 use crate::channels;
 use crate::heartbeat::SHOULD_HEARTBEAT;
@@ -105,12 +105,12 @@ pub extern "C" fn cranium_keepalive() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cranium_await_message() -> cranium_core::types::FFIOption<ApiOutMsg> {
+pub extern "C" fn cranium_await_message() -> cranium_ffi::FFIOption<ApiOutMsg> {
     await_message().into()
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cranium_try_get_message() -> cranium_core::types::FFIOption<ApiOutMsg> {
+pub extern "C" fn cranium_try_get_message() -> cranium_ffi::FFIOption<ApiOutMsg> {
     try_get_message().into()
 }
 

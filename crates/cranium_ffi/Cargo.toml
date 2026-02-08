@@ -1,6 +1,6 @@
 [package]
-name = "cranium-api"
-description = "A crate extending the Cranium AI library with utilities for using Cranium outside of Bevy as an AI Server."
+name = "cranium-ffi"
+description = "A crate providing FFI types for the Cranium AI library. Mainly intended as a companion to cranium-api."
 version = "0.3.0"
 edition = "2024"
 license = "MPL-2.0"
@@ -13,10 +13,8 @@ crate-type = ["lib", "cdylib"]
 
 [dependencies]
 bevy = { version = ">=0.17.0, <0.19.0", default-features = false}
-cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "../bevy_plugin", optional = false}
 cranium-core = {version = ">=0.1, <=0.3", path = "../core"}
-cranium-ffi = {version = "0.3", path = "../cranium_ffi"}
-crossbeam-channel = "0.5.15"
+cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "../bevy_plugin", optional = false}
 
 [dev-dependencies]
 bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = [

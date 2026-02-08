@@ -21,12 +21,15 @@ cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "crates/bevy_plugin", op
 cranium-actionset-loader = {version = "0.3.0", path = "crates/actionset_loader", optional = true}
 cranium-test-plugin = {version = "0.3.0", path = "crates/test_plugin", optional = true}
 cranium-api = {version = "0.3.0", path = "crates/cranium_api", optional = true}
+cranium-ffi = {version = "0.3.0", path = "crates/cranium_ffi", optional = true}
 
 [dev-dependencies]
 bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["debug"]}
 cranium-core = {path = "crates/core", features = ["nostd_support"] }
 cranium-bevy-plugin = {path = "crates/bevy_plugin", optional = false}
 cranium-test-plugin = {path = "crates/test_plugin", optional = false}
+cranium-api = {version = "0.3.0", path = "crates/cranium_api", optional = false}
+cranium-ffi = {version = "0.3.0", path = "crates/cranium_ffi", optional = false}
 
 [features]
 default = ["logging", "std"]

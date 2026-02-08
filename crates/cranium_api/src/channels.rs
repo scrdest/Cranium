@@ -1,9 +1,7 @@
-use core::borrow::Borrow;
-
 use bevy::prelude::*;
 use bevy::{platform::sync::{OnceLock}};
 use crossbeam_channel;
-use cranium_core::types::{ApiInMsg, ApiOutMsg};
+use cranium_ffi::{ApiInMsg, ApiOutMsg};
 
 const DEFAULT_IN_CHANNEL_BOUND: usize = 100;
 const DEFAULT_OUT_CHANNEL_BOUND: usize = 100;

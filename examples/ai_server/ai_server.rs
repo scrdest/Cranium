@@ -32,16 +32,20 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 // We'll use a thread to run Cranium in the background.
 use std::{thread};
 use std::{time::Duration};
-use cranium_core::types::{ApiInMsg, ApiOutMsg};
+
+// We'll reuse the types from the Rust library to avoid redeclaring; the example already needed to build 
+// cranium_api because of how Cargo examples work, but in a real example we don't quite need this.
+use cranium_ffi::{ApiInMsg, ApiOutMsg, FFIOption};
 
 
 // Bindings to the relevant functions in the DLL.
+// Note that we are NOT actually calling cranium_api's 'native' Rust methods here, we're calling the DLL!
 #[link(name = "target/debug/deps/cranium_api.dll", kind = "dylib")]
 unsafe extern "C" {
     safe fn cranium_create_and_autorun();
     safe fn cranium_keepalive();
-    safe fn cranium_await_message() -> cranium_core::types::FFIOption<ApiOutMsg>;
-    safe fn cranium_try_get_message() -> cranium_core::types::FFIOption<ApiOutMsg>;
+    safe fn cranium_await_message() -> FFIOption<ApiOutMsg>;
+    safe fn cranium_try_get_message() -> FFIOption<ApiOutMsg>;
     safe fn cranium_write_ping() -> bool;
 }
 
@@ -69,13 +73,18 @@ fn main() {
     println!("Starting server at {:?}", start_time);
     let cranium_thread = spawn_cranium_server();
     let mut ctr = 0u8;
+    let mut got_start = false;
+    
+    while !cranium_thread.is_finished() && !got_start {
+        got_start = cranium_await_message().is_some();
+    }
 
     while !cranium_thread.is_finished() {
         thread::sleep(Duration::from_secs(5));
         println!("Slept for 5s, now at {:?}", start_time.elapsed());
         let wrote_ping = cranium_write_ping();
         if wrote_ping {
-            println!("Send a ping");
+            println!("Sent a ping");
         }
 
         let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message().into();
