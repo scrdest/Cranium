@@ -24,8 +24,5 @@ jobs:
     - name: Build dylibs
       run: cargo build -p cranium-api --verbose
     
-    - name: Check
-      run: ls -l target/debug/deps
-    
     - name: Run tests
       run: cargo test --workspace --verbose --no-fail-fast
