@@ -10,22 +10,29 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  build-and-test:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout Repo
+      uses: actions/checkout@v4
 
-    - name: Build workspace
+    - name: Install Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache Cargo Target
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build Workspace
       run: cargo build --workspace --verbose
     
     # This needs to be a separate step, as normal build does NOT create the DLL/SO file.
     - name: Build dylibs
       run: cargo build -p cranium-api --verbose
-    
-    - name: Check
-      run: ls -l target/debug/deps
-    
-    - name: Run tests
-      run: cp target/debug/deps/libcranium_api.so /usr/local/lib; cargo test --workspace --verbose --no-fail-fast --config ./test_config.toml
+
+    - name: List Artifacts (Debug)
+      run: ls -l target/debug
+
+    - name: Run Tests
+      run: cp target/debug/deps/libcranium_api.so /home/runner/work/Cranium/libs; export LD_LIBRARY_PATH="/home/runner/work/Cranium/libs:$LD_LIBRARY_PATH" cargo test --workspace --verbose --no-fail-fast --config ./test_config.toml
