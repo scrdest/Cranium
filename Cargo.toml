@@ -15,10 +15,6 @@ members = [
   "crates/*",
 ]
 
-[lib]
-# Removed doctests for now to see if the CI passes otherwise.
-doctest = false
-
 [dependencies]
 cranium-core = {version = ">=0.1, <=0.3", path = "crates/core"}
 cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "crates/bevy_plugin", optional = true}
