@@ -228,6 +228,7 @@ fn setup_example_entity(
 
     commands.trigger(AiDecisionRequested { 
         entity: ai_id,  
+        request_key: None, 
         smart_objects: Some(new_sos),
     });
 }

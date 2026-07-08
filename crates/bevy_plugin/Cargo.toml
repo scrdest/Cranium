@@ -19,6 +19,9 @@ bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["d
 [features]
 default = []
 
+# Adds plugins needed to operate the AI Server mode of Cranium
+ai_server = []
+
 # Also adds the ActionSetAssetPlugin from cortex-actionset-loader for you.
 include_actionset_loader = [
     "cranium-actionset-loader"

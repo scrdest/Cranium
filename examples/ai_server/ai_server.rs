@@ -68,7 +68,7 @@ fn spawn_cranium_server() -> thread::JoinHandle<()> {
 /// We'll create a Cranium AI Server and do a bit of back-and-forth communication with it, then we'll let 
 /// it gracefully shut down using its heartbeat-timeout functionality.
 /// 
-/// We'll expect the whole thing to run for 3 minutes (assuming the CORTEX_AUTORUN_HEARTBEAT_TIMEOUT_SECONDS
+/// We'll expect the whole thing to run for 3 minutes (assuming the CRANIUM_AUTORUN_HEARTBEAT_TIMEOUT_SECONDS
 /// envvar has not been set to a custom value) - we'll send a keepalive at 1 min mark and expect the default 
 /// timeout of 2 mins after that point.
 fn main() {

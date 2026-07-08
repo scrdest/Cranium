@@ -14,7 +14,10 @@ use cranium_core::decision_loop;
 use cranium_core::smart_object;
 
 #[cfg(feature = "include_actionset_loader")]
-use cortex_actionset_loader::ActionSetAssetPlugin;
+use cranium_actionset_loader::ActionSetAssetPlugin;
+
+#[cfg(feature = "ai_server")]
+use bevy::remote::RemotePlugin;
 
 pub struct CraniumPlugin; 
 
@@ -24,6 +27,12 @@ impl Plugin for CraniumPlugin {
         app
         .add_plugins((
             ActionSetAssetPlugin, 
+        ));
+
+        #[cfg(feature = "ai_server")]
+        app
+        .add_plugins((
+            RemotePlugin, 
         ));
 
         app

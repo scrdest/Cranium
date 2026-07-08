@@ -36,7 +36,7 @@ cranium-api = {version = "0.3.0", path = "crates/cranium_api", optional = false}
 cranium-ffi = {version = "0.3.0", path = "crates/cranium_ffi", optional = false}
 
 [features]
-default = ["logging", "std"]
+default = ["logging", "std", "ai_server"]
 
 bevy_dynamic_linking = ["bevy/dynamic_linking"]
 
@@ -53,7 +53,8 @@ actionset_loader = [
 
 # Everything needed for an 'AI Server' setup of Cranium (i.e. using Cranium as a separate ECS world)
 ai_server = [
-  "cranium-api"
+  "cranium-api",
+  "cranium-ffi"
 ]
 
 # Provides a plugin that sets up most of the basic integration for a 'Bevy-native' setup.

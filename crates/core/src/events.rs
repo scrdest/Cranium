@@ -37,6 +37,10 @@ pub struct AiActionPicked {
     /// The Utility score; this is so that we can decide whether to possibly 
     /// override this with a higher-priority Action later on.
     pub action_score: crate::types::ActionScore,
+
+    /// Identifier of the request that has originally triggered this decision. 
+    /// Used to tie the reponse back to the request that led to it.
+    pub request_key: Option<String>,
 }
 
 impl AiActionPicked {
@@ -46,6 +50,7 @@ impl AiActionPicked {
         action_name: String,
         action_context: ActionContext,
         action_score: crate::types::ActionScore,
+        request_key: Option<String>,
     ) -> Self {
         
         #[cfg(feature = "logging")]
@@ -64,6 +69,7 @@ impl AiActionPicked {
             action_name: action_name,
             action_context: wrapped_ctx,
             action_score: action_score,
+            request_key: request_key,
         }
     }
 }
@@ -83,6 +89,7 @@ pub struct SomeAiDecisionProcessed;
 #[derive(EntityEvent)]
 pub struct AiDecisionRequested {
     pub entity: types::AiEntity,
+    pub request_key: Option<String>,
     pub smart_objects: Option<crate::types::SmartObjects>,
 }
 
@@ -95,6 +102,7 @@ pub struct AiDecisionRequested {
 #[derive(EntityEvent)]
 pub struct AiDecisionInitiated {
     pub entity: types::AiEntity,
+    pub request_key: Option<String>,
     pub smart_objects: Option<crate::types::SmartObjects>,
 }
 
@@ -197,6 +205,7 @@ mod tests {
             action_context: ctx2,
             action_score: 1.,
             entity: entity.into(),
+            request_key: None,
         });
     }
 

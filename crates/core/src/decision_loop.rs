@@ -102,6 +102,7 @@ pub fn prepare_ai(
     
     commands.trigger(AiDecisionInitiated {
         entity: event.entity,
+        request_key: event.request_key.clone(),
         smart_objects: event.smart_objects.clone(),
     });
 }
@@ -697,6 +698,7 @@ pub fn decision_engine(
                 action_name: best_template.name.to_owned(),
                 action_context: best_context.to_owned(),
                 action_score: best_score,
+                request_key: event.request_key.clone()
             };
 
             commands.trigger(pick_evt);

@@ -18,7 +18,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! The timestamp can be updated by calling the [`cranium_keepalive`] function in the FFI.
 //! 
 //! The timeout for missed heartbeats can be configured at compile-time 
-//! by setting the `CORTEX_AUTORUN_HEARTBEAT_TIMEOUT_SECONDS` envvar.
+//! by setting the `CRANIUM_AUTORUN_HEARTBEAT_TIMEOUT_SECONDS` envvar.
 //! 
 //! For long-running applications, numerical stability is ensured by using a wrap period for the heartbeat time, 
 //! which is also configurable, using `CORTEX_AUTORUN_PERIOD_SECONDS` - generally, this should be at least an order 
@@ -137,7 +137,7 @@ pub struct AutoRunHeartbeatPlugin;
 
 impl Plugin for AutoRunHeartbeatPlugin {
     fn build(&self, app: &mut App) {
-        let timeout_seconds = option_env!("CORTEX_AUTORUN_HEARTBEAT_TIMEOUT_SECONDS")
+        let timeout_seconds = option_env!("CRANIUM_AUTORUN_HEARTBEAT_TIMEOUT_SECONDS")
         .map(|s| s.trim().parse::<u64>().ok()).flatten()
         .unwrap_or(60*2) // 2 mins by default
         ; 
