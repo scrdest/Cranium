@@ -44,6 +44,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! to NPCs 1:1, a whole crowd can share one collective 'brain' that controls the overall 'flow'.
 
 use bevy::ecs::component::Component;
+use bevy::prelude::ReflectComponent;
 
 use crate::types::AiLodLevelPrimitive;
 
@@ -66,9 +67,9 @@ pub const LOD_INACTIVE: AiLodLevelPrimitive = AiLodLevelPrimitive::MAX;   // i.e
 
 
 #[derive(Clone, Copy, bevy::reflect::Reflect, Debug)]
-pub struct AiLevelOfDetailValue(AiLodLevelPrimitive);
+pub struct AILevelOfDetailValue(AiLodLevelPrimitive);
 
-impl AiLevelOfDetailValue {
+impl AILevelOfDetailValue {
     pub fn new(level: AiLodLevelPrimitive) -> Self {
         Self(level)
     }
@@ -86,31 +87,32 @@ impl AiLevelOfDetailValue {
     }
 }
 
-impl Default for AiLevelOfDetailValue {
+impl Default for AILevelOfDetailValue {
     fn default() -> Self {
         Self(LOD_NORMAL)
     }
 }
 
 #[derive(Component, Default, bevy::reflect::Reflect, Clone)]
-pub struct AiLevelOfDetail {
-    lod: AiLevelOfDetailValue
+#[reflect(Component)]
+pub struct AILevelOfDetail {
+    lod: AILevelOfDetailValue
 }
 
-impl AiLevelOfDetail {
-    pub fn new(level: AiLevelOfDetailValue) -> Self {
+impl AILevelOfDetail {
+    pub fn new(level: AILevelOfDetailValue) -> Self {
         Self { lod: level }
     }
 
     pub fn new_from_value(level: AiLodLevelPrimitive) -> Self {
-        Self { lod: AiLevelOfDetailValue::new(level) }
+        Self { lod: AILevelOfDetailValue::new(level) }
     }
 
     pub const fn new_const_from_value<const LVL: AiLodLevelPrimitive>() -> Self {
-        Self { lod: AiLevelOfDetailValue::new_const::<LVL>() }
+        Self { lod: AILevelOfDetailValue::new_const::<LVL>() }
     }
 
-    pub fn get_current_lod(&self) -> AiLevelOfDetailValue {
+    pub fn get_current_lod(&self) -> AILevelOfDetailValue {
         self.lod
     }
 }

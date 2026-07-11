@@ -285,7 +285,7 @@ impl Plugin for ConsiderationPlugin {
             .init_resource::<ConsiderationKeyToSystemMap>()
             .add_systems(Startup, reinit_consideration_queries)
             .add_systems(FixedFirst, reinit_consideration_queries)
-            .add_observer(crate::decision_loop::disable_cf_reinit)
+            .add_observer(crate::decision_loop::disable_consideration_reinit)
         ;
     }
 }

@@ -4,7 +4,7 @@ If a copy of the MPL was not distributed with this file,
 You can obtain one at https://mozilla.org/MPL/2.0/. 
 */
 
-//! Assorted Event types used by Cortex.
+//! Assorted Event types used by Cranium.
 
 use bevy::prelude::*;
 use crate::{actions::ActionContext, types};
@@ -163,6 +163,14 @@ impl AiActionDispatchToUserCode {
             action_score: action_score,
         }
     }
+}
+
+
+#[derive(Message)]
+pub struct NoDecisionMessage {
+    pub entity: Entity,
+    pub request_key: Option<String>,
+    pub comment: Option<&'static str>,
 }
 
 

@@ -48,8 +48,14 @@ unsafe extern "C" {
     safe fn cranium_create_and_autorun();
     safe fn cranium_keepalive();
     safe fn cranium_await_message() -> FFIOption<ApiOutMsg>;
-    safe fn cranium_try_get_message() -> FFIOption<ApiOutMsg>;
+    safe fn cranium_try_get_message_with_timeout() -> FFIOption<ApiOutMsg>;
     safe fn cranium_write_ping() -> bool;
+    safe fn cranium_request_spawn_u64(host_id: u64, components: *const core::ffi::c_char);
+    safe fn cranium_request_spawn_usize(host_id: usize, components: *const core::ffi::c_char);
+    safe fn cranium_request_despawn_u64(host_id: u64);
+    safe fn cranium_request_despawn_usize(host_id: usize);
+    safe fn cranium_request_decision_u64(host_id: u64, request_key: *const core::ffi::c_char);
+    safe fn cranium_request_decision_usize(host_id: usize, request_key: *const core::ffi::c_char);
 }
 
 /// A trivial Rusty wrapper for the extern function to make thread::spawn happy.
@@ -90,11 +96,83 @@ fn main() {
             println!("Sent a ping");
         }
 
-        let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message().into();
+        let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
         if let Some(msg) = maybe_msg {
             println!("Received a message: {:?}", msg);
         }
+
         ctr += 1;
+
+        if ctr == 1 {
+            println!("Sending a spawn ID=5 (u64) request...");
+
+            let payload = cranium_ffi::ffi_raw_string_from_str(
+                "{
+                    \"CraniumTestComponent\": {\"val\": 55},
+                    \"AIController\": {}
+                }\0"
+            );
+
+            cranium_request_spawn_u64(5, payload);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {:?}", msg);
+            }
+        }
+
+        if ctr == 2 {
+            println!("Sending a spawn ID=6 (usize) request...");
+            
+            let payload = cranium_ffi::ffi_raw_string_from_str(
+                "{
+                    \"CraniumTestComponent\": {\"val\": 66},
+                    \"AIController\": {}
+                }\0"
+            );
+
+            cranium_request_spawn_usize(6, payload);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {:?}", msg);
+            }
+        }
+
+        if ctr == 4 {
+            println!("Sending a despawn ID=6 (usize) request...");
+
+            cranium_request_despawn_usize(6);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {:?}", msg);
+            }
+        }
+
+        if ctr == 3 {
+            println!("Sending a ID=5 (u64) AI Decision request...");
+            let request_key = cranium_ffi::ffi_raw_string_from_str("test_rq\0");
+
+            cranium_request_decision_u64(5, request_key);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {:?}", msg);
+            }
+        }
+
+        if ctr == 5 {
+            println!("Sending a despawn ID=5 (u64) request...");
+
+            cranium_request_despawn_u64(5);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {:?}", msg);
+            }
+        }
+
         if ctr == 12 || ctr == 24 {
             println!("Sending a keep-alive heartbeat...");
             cranium_keepalive();

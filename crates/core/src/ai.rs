@@ -10,6 +10,7 @@ use bevy::prelude::*;
 
 
 /// The AIController is the main 'something running AI calculations' marker. 
-#[derive(Component, Default)]
+#[derive(Component, Default, Reflect)]
+#[reflect(Component)]
 pub struct AIController {}
 

@@ -151,10 +151,10 @@ impl UtilityConstantCurve {
     /// The value is fully const and always safe to construct (enforced at type-level).
     /// 
     /// The value is effectively calculated as (VAL/256), e.g.
-    /// - UtilityStaticConstantCurve<0> will return 0.00, 
-    /// - UtilityStaticConstantCurve<64> will return 0.25.
-    /// - UtilityStaticConstantCurve<128> will return 0.50.
-    /// - UtilityStaticConstantCurve<255> will return 1.00 (special case).
+    /// - UtilityConstantCurve<0> will return 0.00, 
+    /// - UtilityConstantCurve<64> will return 0.25.
+    /// - UtilityConstantCurve<128> will return 0.50.
+    /// - UtilityConstantCurve<255> will return 1.00 (special case).
     /// 
     /// This means we can conveniently represent all common predefined values as u8 
     /// easily, at the low, low price of sacrificing 0.99609375 as unrepresentable.

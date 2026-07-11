@@ -1,17 +1,26 @@
+/* 
+This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
+If a copy of the MPL was not distributed with this file, 
+You can obtain one at https://mozilla.org/MPL/2.0/. 
+*/
 use core::time::Duration;
 
 use bevy::platform::collections::HashMap;
+use bevy::platform::sync::Arc;
 use bevy::prelude::*;
 use bevy::{platform::sync::{OnceLock}};
-use cranium_core::events::{AiActionPicked, AiDecisionRequested};
+use cranium_core::ai::AIController;
+use cranium_core::actions::ActionKey;
+use cranium_core::events::{AiActionPicked, AiDecisionRequested, NoDecisionMessage};
+use cranium_core::smart_object::SmartObjects;
 use crossbeam_channel;
-use cranium_ffi::{ApiInMsg, ApiOutMsg, EntityOperation, HostIdType, HostMapped, NativeHostIdType};
+use cranium_ffi::{ApiInMsg, ApiOutMsg, EntityOperation, FFIIngestedString, HostIdType, HostMapped, NativeHostIdType, ffi_raw_string_from_str};
 
 use crate::spawn;
 
-const DEFAULT_IN_CHANNEL_BOUND: usize = 10_000;
-const DEFAULT_OUT_CHANNEL_BOUND: usize = 10_000;
-const MAX_FULL_TICKS_FOR_MAINTENANCE: usize = 10;
+pub(crate) const DEFAULT_IN_CHANNEL_BOUND: usize = 10_000;
+pub(crate) const DEFAULT_OUT_CHANNEL_BOUND: usize = 10_000;
+pub(crate) const MAX_FULL_TICKS_FOR_MAINTENANCE: usize = 10;
 
 
 /// The Channel that routes messages FROM the host TO the Cranium Bevy App. 
@@ -85,7 +94,7 @@ pub(crate) struct QueuedApiOutMessage(pub(crate) ApiOutMsg);
 
 
 /// A System that handles receiving and applying updates from the user application to the Cranium app.
-fn process_input_messages(
+pub(crate) fn process_input_messages(
     in_channel: ResMut<ApiInputChannel>, 
     mut exit_writer: MessageWriter<AppExit>,
     mut message_queue: MessageWriter<QueuedApiOutMessage>, 
@@ -139,7 +148,7 @@ fn process_input_messages(
 }
 
 
-fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
+pub(crate) fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
     out_channel: ResMut<ApiOutputChannel>,
     mut message_queue: MessageReader<QueuedApiOutMessage>, 
 ) {
@@ -169,7 +178,7 @@ fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
 /// The ACTUAL deletion is handled by an Observer (HostEntityRemovalTriggered) later (if we are lucky).
 #[derive(Message)]
 pub(crate) struct HostEntityRequestRemovalMessage<T: HostIdType> {
-    target_host_id: T,
+    pub(crate) target_host_id: T,
 }
 
 /// This represents that we have decided that a HostMapped Cranium Entity needs to go. 
@@ -180,69 +189,36 @@ pub(crate) struct HostEntityRequestRemovalMessage<T: HostIdType> {
 /// The core cleanup is guaranteed to only run at the end of the update schedule.
 #[derive(Message)]
 pub(crate) struct HostEntityRemovalTriggered {
-    entity: Entity
+    pub(crate) entity: Entity
 }
 
 #[derive(Default, Resource)]
 pub struct HostIdToEntityRegistry<T: HostIdType>(pub HashMap<T, Entity>);
 
 #[derive(Default, Resource)]
-pub struct EntityToHostIdRegistry<T: HostIdType>(HashMap<Entity, T>);
+pub struct EntityToHostIdRegistry<T: HostIdType>(pub(crate) HashMap<Entity, T>);
 
 
-fn host_entity_removal_request_processor<T: HostIdType + 'static> (
-    mapping_registry: Res<HostIdToEntityRegistry<T>>, 
-    mut msg_reader: MessageReader<HostEntityRequestRemovalMessage<T>>,
-    mut msg_writer: MessageWriter<HostEntityRemovalTriggered>,
-) {
-    let removals = msg_reader.read_with_id().filter_map(
-        |(msg, _msg_id)| {
-            mapping_registry.0.get(&msg.target_host_id)
-        }
-    ).map(|entity| HostEntityRemovalTriggered { entity: *entity });
-
-    msg_writer.write_batch(removals);
-}
-
-
-/// The System counterpart of HostEntityRemovalTriggered Messages. 
-/// Handles the core job of that Message - despawning HostMapped entities
-fn host_entity_removal_executor<T: HostIdType + 'static> (
-    mut msg_reader: MessageReader<HostEntityRemovalTriggered>,
-    mut commands: Commands, 
-    mut from_hostmapping: ResMut<HostIdToEntityRegistry<T>>,
-    mut to_hostmapping: ResMut<EntityToHostIdRegistry<T>>,
-) {
-    msg_reader.read_with_id().for_each(|(msg, _msg_id)| {
-        // Despawn the Entity proper.
-        commands
-        .get_entity(msg.entity)
-        .ok()
-        .map(|mut ecmd| { 
-            ecmd.despawn()
-        });
-
-        // Remove the deleted Host ID from the Host2Cranium map.
-        to_hostmapping.0
-            .get(&msg.entity)
-            .map(|hostid| {
-                from_hostmapping.0.remove(hostid);
-            });
-
-
-        // Remove the deleted Host ID from the Cranium2Host map.
-        to_hostmapping.0.remove(&msg.entity);
-    });
-}
-
-/// A System that simply converts 
-fn decision_requested_msg_handler<I: HostIdType + 'static>(
+/// A System that simply converts DecisionRequestedMsgs into Observer triggers 
+/// for processing Decisions for each AI (which ultimately get emitted back as
+/// AiActionPicked Events and turned into ApiOutMsg::ActionChosen Messages).
+/// 
+/// Note that a request is NOT guaranteed to trigger an AI decision! 
+/// 
+/// Cranium reserves the right to suppress requests that do not target 
+/// an actual AI-enabled Entity or have no possible Actions to evaluate; 
+/// then of course even if the Decision Engine runs, we may still wind up 
+/// not finding any valid Actions for the current state of the AI agent.
+pub(crate) fn decision_requested_msg_handler<I: HostIdType + 'static>(
     host_id_registry: Res<HostIdToEntityRegistry<I>>,
+    so_query: Query<&SmartObjects, With<AIController>>, 
     mut in_messages: MessageReader<DecisionRequestedMsg<I>>,
+    mut failure_messages: MessageWriter<NoDecisionMessage>,
     mut commands: Commands,
 ) {
     in_messages.read_with_id().for_each(|(msg, msg_id)| {
-        host_id_registry.0.get(&msg.target)
+        host_id_registry
+        .0.get(&msg.target)
         .map_or_else(
             || {
                 bevy::log::error!("Decision requested for an unrecognized/untracked Entity! MsgId: {:?} | RqKey: {:?} | HostId: {:?}", 
@@ -252,20 +228,114 @@ fn decision_requested_msg_handler<I: HostIdType + 'static>(
                 );
             }, 
             |local_entity| {
-                commands.trigger(AiDecisionRequested {
-                    entity: *local_entity,
-                    request_key: Some(msg.request_key.clone()),
-                    smart_objects: None // TODO: review!
-                });
+                let smart_objects = so_query
+                    .get(*local_entity)
+                    .map(|so_data| so_data)
+                    .ok()
+                ;
+                
+                match smart_objects {
+                    Some(sos) => {
+                        bevy::log::debug!(
+                            "Triggered a Decision request for Entity {} with {} SmartObject ActionSets.", 
+                            local_entity,
+                            sos.actionset_refs.len()
+                        );
+                        commands.trigger(AiDecisionRequested {
+                            entity: *local_entity,
+                            request_key: Some(msg.request_key.clone()),
+                            smart_objects: Some(sos.clone()),
+                        });
+                    },
+
+                    None => {
+                        bevy::log::debug!(
+                            "Ignored a Decision request for Entity {} - no SmartObjects available.", 
+                            local_entity,
+                        );
+                        failure_messages.write(NoDecisionMessage {
+                            entity: *local_entity,
+                            request_key: Some(msg.request_key.clone()),
+                            comment: Some("No SmartObjects available.")
+                        });
+                    }
+                }
             }
         )
         ;
     });
 }
 
-fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
+#[derive(Default, Resource)]
+pub struct HostActionIdMap<I: HostIdType + 'static> {
+    pub(crate) key_to_host_id_map: HashMap<Arc<ActionKey>, Arc<I>>,
+    pub(crate) host_id_to_key_map: HashMap<Arc<I>, Arc<ActionKey>>,
+}
+
+impl<I: HostIdType + 'static> HostActionIdMap<I> {
+    fn get_host_id(&self, key: &ActionKey) -> Option<&Arc<I>> {
+        self.key_to_host_id_map.get(key)
+    }
+
+    fn get_action_key(&self, key: &I) -> Option<&Arc<ActionKey>> {
+        self.host_id_to_key_map.get(key)
+    }
+
+    /// Registers a (bijective) mapping from HostId (H) to an ActionKey (A). 
+    /// 
+    /// Returns self for a fluent API-style interface.
+    /// 
+    /// Critically, the bijective-ness means the mapping is strictly 1:1! 
+    /// Any insert(H, A) inserts a unique H->A mapping and a unique A->H mapping.
+    /// An ActionKey can therefore be mapped to only one HostId and vice versa. 
+    /// 
+    /// If either H or A are already mapped to something else, the old relationship will
+    /// be replaced and a warning log entry will be emitted for each affected 'direction'.
+    /// 
+    /// Generally speaking, this would ideally not happen at all, and if it does, 
+    /// we'd expect to see warnings emitted for both H->A and A->H directions. 
+    pub fn insert(&mut self, host_id: I, action_key: ActionKey) -> &mut Self {
+        let arc_action_key = Arc::new(action_key);
+        let arc_host_id = Arc::new(host_id);
+
+        self.key_to_host_id_map
+            .insert(arc_action_key.clone(), arc_host_id.clone())
+            .map(|old| {
+                bevy::log::warn!(
+                    "HostActionIdMap insert of ActionKey '{:?}'->'{:?}' is overwriting a previous HostId mapping '{:?}'",
+                    arc_action_key.as_ref(),
+                    arc_host_id.as_ref(),
+                    old,
+                )
+            }
+        );
+
+        self.host_id_to_key_map
+            .insert(arc_host_id.clone(), arc_action_key.clone())
+            .map(|old| {
+                bevy::log::warn!(
+                    "HostActionIdMap insert of HostId '{:?}'->'{:?}' is overwriting a previous ActionKey mapping '{:?}'",
+                    arc_host_id.as_ref(),
+                    arc_action_key.as_ref(), 
+                    old,
+                )
+            }
+        );
+        self
+    }
+
+    /// Unregisters a (bijective) mapping from HostId to an ActionKey.
+    pub fn remove(&mut self, host_id: &I, action_key: &ActionKey) -> (Option<Arc<ActionKey>>, Option<Arc<I>>) {
+        let keypop = self.host_id_to_key_map.remove(host_id);
+        let hostpop = self.key_to_host_id_map.remove(action_key);
+        (keypop, hostpop)
+    }
+}
+
+pub(crate) fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
     trigger: On<AiActionPicked>,
     query: Query<&HostMapped<I>>,
+    host_action_id_registry: Res<HostActionIdMap<I>>,
     mut message_queue: MessageWriter<QueuedApiOutMessage>,
 ) {
     let host_mapped_agent_id = query.get(trigger.event_target()).and_then(|comp| {
@@ -276,17 +346,48 @@ fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
         Ok(comp.host_id.clone())
     }).unwrap();
 
+    let host_mapped_action = host_action_id_registry.get_host_id(&trigger.action_key).unwrap();
+
+    // let translated_rq_key = trigger.request_key.map(|k| ffi_raw_string_from_str(&k));
+
     message_queue.write(QueuedApiOutMessage(ApiOutMsg::ActionChosen { 
         host_agent_id: host_mapped_agent_id.into(), 
-        host_action_id: trigger.action_key.clone(), 
+        host_action_id: host_mapped_action.as_ref().to_owned().into(), 
         host_context_id: host_mapped_context.into(), 
+        // request_key: translated_rq_key,
     }))
     ;
 }
 
 
+pub(crate) fn decision_failed_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
+    query: Query<&HostMapped<I>>,
+    mut input_msgs: MessageReader<NoDecisionMessage>,
+    mut message_queue: MessageWriter<QueuedApiOutMessage>,
+) {
+    let messages = input_msgs.read().map(|msg| {
+        let host_mapped_agent_id = query
+            .get(msg.entity)
+            .and_then(|comp| {
+                Ok(comp.host_id.clone())
+            }
+        ).unwrap();
+
+        // let translated_rq_key = trigger.request_key.map(|k| ffi_raw_string_from_str(&k));
+
+        QueuedApiOutMessage(ApiOutMsg::NoActionChosen { 
+            host_agent_id: host_mapped_agent_id.into(), 
+            // request_key: translated_rq_key,
+        })
+    })
+    ;
+
+    message_queue.write_batch(messages);
+}
+
+
 /// A maintenance system that tries to save clogged output channels by popping oldest messages off of it. 
-fn check_output_channel_for_clogs(
+pub(crate) fn check_output_channel_for_clogs(
     out_channel: ResMut<ApiOutputChannelMaintenance>,
     mut channel_full_ticks: Local<usize>,
 ) {
@@ -299,122 +400,5 @@ fn check_output_channel_for_clogs(
         // Pop a message from the channel to hopefully unclog it.
         bevy::log::debug!("Cranium output channel clogged! Attempting a receive...");
         let _ = out_channel.receiver.recv();
-    }
-}
-
-/// A Plugin that adds Channels for communication between Bevy worlds and external code.
-#[derive(Default)]
-pub struct ApiChannelsPlugin {
-    in_channel_bound: Option<usize>,
-    out_channel_bound: Option<usize>,
-}
-
-impl ApiChannelsPlugin {
-    pub fn with_bounds(in_bound: Option<usize>, out_bound: Option<usize>) -> Self {
-        Self {
-            in_channel_bound: in_bound,
-            out_channel_bound: out_bound,
-        }
-    }
-
-    pub fn with_bounds_tuple(bounds: Option<(usize, usize)>) -> Self {
-        Self {
-            in_channel_bound: bounds.map(|b| b.0),
-            out_channel_bound: bounds.map(|b| b.1),
-        }
-    }
-}
-
-
-impl Plugin for ApiChannelsPlugin {
-    fn build(&self, app: &mut App) {
-        // Wire up the input channel...
-        let in_bound = self.in_channel_bound.unwrap_or(DEFAULT_IN_CHANNEL_BOUND);
-        let (in_snd, in_rcv) = crossbeam_channel::bounded::<ApiInMsg>(in_bound);
-        let channel_result = IN_CHANNEL.set(in_snd.clone());
-
-        channel_result.expect("ApiChannelsPlugin IN_CHANNEL is already initialized (somehow)!");
-        
-        // Resources for handling input channel stuff.
-        app.insert_resource(ApiInputChannel { receiver: in_rcv });
-        app.insert_resource(ApiInputChannelMock { sender: in_snd });
-
-        // ...and the output channel.
-        let out_bound = self.out_channel_bound.unwrap_or(DEFAULT_OUT_CHANNEL_BOUND);
-        let (out_snd, out_rcv) = crossbeam_channel::bounded::<ApiOutMsg>(out_bound);
-        let channel_result = OUT_CHANNEL.set(out_rcv.clone());
-        
-        channel_result.expect("ApiChannelsPlugin OUT_CHANNEL is already initialized (somehow)!");
-
-        let start_sent = out_snd.send(ApiOutMsg::CraniumStarted);
-        start_sent.expect("Failed to send initial message on the OUT channel.");
-        
-        // Resources for handling output channel stuff.
-        app.insert_resource(ApiOutputChannel { sender: out_snd });
-        app.insert_resource(ApiOutputChannelMaintenance { receiver: out_rcv });
-
-        // Resources for mapping Host IDs to Cranium IDs and back.
-        let from_host_id_reg: HashMap<NativeHostIdType, Entity> = HashMap::new();
-        let to_host_id_reg: HashMap<Entity, NativeHostIdType> = HashMap::new();
-        app.insert_resource(HostIdToEntityRegistry(from_host_id_reg));
-        app.insert_resource(EntityToHostIdRegistry(to_host_id_reg));
-
-        // Wire up the systems processing the channels.
-        app.add_systems(PreUpdate, 
-            (
-                process_input_messages, 
-            )
-        );
-
-        // Output handling
-        app.add_message::<QueuedApiOutMessage>();
-
-        app.add_systems(Last, (
-                check_output_channel_for_clogs,
-                process_queued_output_messages::<1>,
-            ).chain()
-        );
-
-
-        // Entity removal core pipeline.
-        // 
-        // Note that the plugin only covers the NativeHostIdType impl - if users want to use their own custom 
-        // Host ID types, they will need to write their own plugin/app setup to add analogous Systems for that.
-        // 
-        // Also note that those are ultimately processors on a Message bus - by design, you can hook up 
-        // additional consumer Systems to these buses to add additional handling for Host entity removals. 
-        app.add_message::<HostEntityRequestRemovalMessage<NativeHostIdType>>();
-        app.add_systems(PreUpdate, host_entity_removal_request_processor::<NativeHostIdType>);
-        
-        app.add_message::<HostEntityRemovalTriggered>();
-        app.add_systems(Last, host_entity_removal_executor::<NativeHostIdType>);
-
-
-        // Entity upsert core pipeline.
-        // 
-        // Note that the plugin only covers the NativeHostIdType impl - if users want to use their own custom 
-        // Host ID types, they will need to write their own plugin/app setup to add analogous Systems for that. 
-        // 
-        // Also note that those are ultimately processors on a Message bus - by design, you can hook up 
-        // additional consumer Systems to these buses to add additional handling for Host entity upserts. 
-        app.add_message::<spawn::HostSpawnRequestMsg<NativeHostIdType>>();
-        app.add_message::<spawn::HostSpawnResponseSuccessMsg<NativeHostIdType>>();
-        app.add_message::<spawn::HostSpawnResponseErrorMsg<NativeHostIdType>>();
-        app.add_systems(
-            PreUpdate, 
-            (
-                spawn::process_remote_spawn_entity_request::<NativeHostIdType>,
-                (
-                    spawn::forward_spawn_error_signals,
-                    spawn::forward_spawn_success_signals,
-                )
-            ).chain()
-        );
-
-        // Async decision request/response handling.
-        app.add_message::<DecisionRequestedMsg::<NativeHostIdType>>();
-        app.add_systems(PreUpdate, decision_requested_msg_handler::<NativeHostIdType>);
-        app.add_observer(decision_output_handler::<NativeHostIdType>);
-
     }
 }

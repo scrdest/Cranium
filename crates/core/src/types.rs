@@ -5,6 +5,10 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 //! Type aliases and 'abstracting' newtypes.
 
+// NOTE: Some of the feature-branches may resolve to the same types. 
+//       This is deliberate; it leaves room for changing implementations later, 
+//       e.g. for cases where a std-only library can be used as an optimization in an std env.
+
 use bevy::platform::prelude::String;
 
 pub use crate::thread_safe_wrapper::ThreadSafeRef;
@@ -26,7 +30,6 @@ mod std_types {
 #[cfg(all(any(feature = "nostd_support")))]
 mod nostd_types {
     //! std-free implementations 
-    
     /// A standardized Cranium type for Read-Write Locks (i.e. std::sync::RwLock<T> or similar)
     pub type CraniumRwLock<T> = bevy::platform::sync::RwLock<T>;
 

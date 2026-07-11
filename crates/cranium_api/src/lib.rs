@@ -13,6 +13,8 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 pub(crate) mod api;
 pub(crate) mod channels;
 pub(crate) mod heartbeat;
+pub(crate) mod plugin;
 pub(crate) mod spawn;
+pub(crate) mod type_registrations;
 
 pub use api::*;

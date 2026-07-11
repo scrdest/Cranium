@@ -1,15 +1,15 @@
-use core::time::Duration;
 /* 
 This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
 If a copy of the MPL was not distributed with this file, 
 You can obtain one at https://mozilla.org/MPL/2.0/. 
 */
+use core::time::Duration;
 use core::{sync::atomic};
 
 use bevy::prelude::*;
 
 use cranium_bevy_plugin::CraniumPlugin;
-use cranium_ffi::{ApiInMsg, ApiOutMsg};
+use cranium_ffi::{ApiInMsg, ApiOutMsg, EntityOperation, NativeHostIdType};
 
 use crate::channels;
 use crate::heartbeat::SHOULD_HEARTBEAT;
@@ -52,7 +52,7 @@ pub fn configure_for_autorun(mut app: App) -> App {
     app.add_plugins((
         MinimalPlugins.set(bevy::app::ScheduleRunnerPlugin::run_loop(core::time::Duration::from_millis(run_rate))),
         AutoRunHeartbeatPlugin,
-        channels::ApiChannelsPlugin::default(),
+        crate::plugin::ApiChannelsPlugin::default(),
     ));
     
     app
@@ -78,7 +78,7 @@ pub fn await_message() -> Option<ApiOutMsg> {
     msg
 }
 
-pub fn try_get_message() -> Option<ApiOutMsg> {
+pub fn try_get_message_with_timeout() -> Option<ApiOutMsg> {
     let msg = channels::OUT_CHANNEL.get().map(|ch| {
         ch.recv_timeout(Duration::from_secs(1)).ok()
     }).flatten();
@@ -89,6 +89,64 @@ pub fn try_get_message() -> Option<ApiOutMsg> {
 pub fn write_ping() -> bool {
     let success = channels::IN_CHANNEL.get().map(|ch| {
         ch.send(ApiInMsg::Ping).err()
+    }).flatten().is_none();
+
+    success
+}
+
+pub fn request_spawn<I: Into<NativeHostIdType>>(host_id: I, components: cranium_ffi::FFIIngestedString) -> bool {
+    // As a UX convenience, spawning entities is treated as a heartbeat signal too.
+    SHOULD_HEARTBEAT.store(true, atomic::Ordering::Release);
+
+    let component_string = components;
+
+    let ops = vec![
+        EntityOperation::UpsertEntity { 
+            host_id: host_id.into(), 
+            components: component_string
+        }
+    ];
+
+    let success = channels::IN_CHANNEL.get().map(|ch| {
+        ch.send(ApiInMsg::SyncBatch { 
+            ops: ops
+        }).err()
+    }).flatten().is_none();
+
+    success
+}
+
+pub fn request_despawn<I: Into<NativeHostIdType>>(host_id: I) -> bool {
+    // As a UX convenience, despawning entities is treated as a heartbeat signal too.
+    SHOULD_HEARTBEAT.store(true, atomic::Ordering::Release);
+
+    let ops = vec![
+        EntityOperation::RemoveEntity { 
+            host_id: host_id.into(), 
+        }
+    ];
+
+    let success = channels::IN_CHANNEL.get().map(|ch| {
+        ch.send(ApiInMsg::SyncBatch { 
+            ops: ops
+        }).err()
+    }).flatten().is_none();
+
+    success
+}
+
+pub fn request_decision<I: Into<NativeHostIdType>>(host_id: I, request_key: cranium_ffi::FFIIngestedString) -> bool {
+    // As a UX convenience, querying AIs is treated as a heartbeat signal too.
+    SHOULD_HEARTBEAT.store(true, atomic::Ordering::Release);
+
+    let string_cast = request_key;
+
+    let ops = vec![
+        (string_cast, host_id.into())
+    ];
+
+    let success = channels::IN_CHANNEL.get().map(|ch| {
+        ch.send(ApiInMsg::RequestDecision { targets: ops }).err()
     }).flatten().is_none();
 
     success
@@ -110,11 +168,41 @@ pub extern "C" fn cranium_await_message() -> cranium_ffi::FFIOption<ApiOutMsg> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cranium_try_get_message() -> cranium_ffi::FFIOption<ApiOutMsg> {
-    try_get_message().into()
+pub extern "C" fn cranium_try_get_message_with_timeout() -> cranium_ffi::FFIOption<ApiOutMsg> {
+    try_get_message_with_timeout().into()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn cranium_write_ping() -> bool {
     write_ping()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_spawn_u64(host_id: u64, components: cranium_ffi::FFIRawString) -> bool {
+    request_spawn(host_id, unsafe { cranium_ffi::ingest_string_from_ffi_raw_string(components) })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_spawn_usize(host_id: usize, components: cranium_ffi::FFIRawString) -> bool {
+    request_spawn(host_id, unsafe { cranium_ffi::ingest_string_from_ffi_raw_string(components) })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_despawn_u64(host_id: u64) -> bool {
+    request_despawn(host_id)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_despawn_usize(host_id: usize) -> bool {
+    request_despawn(host_id)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_decision_u64(host_id: u64, request_key: cranium_ffi::FFIRawString) -> bool {
+    request_decision(host_id, unsafe { cranium_ffi::ingest_string_from_ffi_raw_string(request_key) })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_decision_usize(host_id: usize, request_key: cranium_ffi::FFIRawString) -> bool {
+    request_decision(host_id, unsafe { cranium_ffi::ingest_string_from_ffi_raw_string(request_key) })
 }

@@ -16,8 +16,8 @@ use crate::context_fetchers::{ContextFetcherKeyToSystemMap, ShouldReinitCfQuerie
 use crate::considerations::{ConsiderationKeyToSystemMap, ShouldReinitConsiderationQueries};
 use crate::curves::{SupportedUtilityCurve, UtilityCurve, UtilityCurveRegistry, resolve_curve_from_name};
 use crate::errors::NoCurveMatchStrategyConfig;
-use crate::events::{AiActionPicked, AiDecisionInitiated, AiDecisionRequested, SomeAiDecisionProcessed};
-use crate::lods::{AiLevelOfDetail};
+use crate::events::{AiActionPicked, AiDecisionInitiated, AiDecisionRequested, NoDecisionMessage, SomeAiDecisionProcessed};
+use crate::lods::{AILevelOfDetail};
 use crate::pawn::Pawn;
 use crate::smart_object::ActionSetStore;
 use crate::types::{self, ActionContextRef, ActionScore, ActionTemplateRef, ThreadSafeRef};
@@ -92,6 +92,12 @@ pub fn prepare_ai(
     should_reinit_cons_queries: Option<ResMut<ShouldReinitConsiderationQueries>>,
     mut commands: Commands,
 ) {
+    bevy::log::debug!(
+        "AiDecisionRequested Event fired, preparing AI for Entity {} (Request: {:?})", 
+        event.entity,
+        event.request_key,
+    );
+
     should_reinit_cf_queries.map(|mut res| {
         res.set(true);
     });
@@ -164,12 +170,18 @@ pub fn decision_engine(
     context_fetcher_system_map: Res<ContextFetcherKeyToSystemMap>,
     consideration_system_map: Res<ConsiderationKeyToSystemMap>,
     entity_checker: Query<Entity, With<AIController>>, 
-    lod_query: Query<Option<&AiLevelOfDetail>>, 
+    lod_query: Query<Option<&AILevelOfDetail>>, 
     pawn_query: Query<Option<&Pawn>>,
     utility_curve_registry: Option<Res<UtilityCurveRegistry>>,
     no_match_strategy_config: Option<Res<NoCurveMatchStrategyConfig>>,
     mut commands: Commands,
+    // mut failure_messages: MessageWriter<crate::events::NoDecisionMessage>,
 ) {
+    bevy::log::debug!(
+        "AiDecisionInitiated Event fired, running Decision Engine for Entity {} (Request: {:?})", 
+        event.entity,
+        event.request_key,
+    );
     // Marks that SOMEONE has done some AI processing in this world-loop tick. 
     // This is currently mainly used to disable unnecessary duplicate reinits 
     // until the next time some AI decides to run and will actually use them.
@@ -183,6 +195,11 @@ pub fn decision_engine(
         // was malformed and was pointed at something that was not an AI in the first place.
         #[cfg(feature = "logging")]
         bevy::log::debug!("decision_engine: Decision request target {:?} is not an AI - ignoring the request.", audience);
+        // failure_messages.write(NoDecisionMessage {
+        //     entity: event.entity,
+        //     request_key: event.request_key.clone(),
+        //     comment: Some("Target is not an AI!"),
+        // });
         return;
     }
     
@@ -199,6 +216,11 @@ pub fn decision_engine(
         // fire in the first place, but weird things can sometimes happen in sufficiently big projects...
         #[cfg(feature = "logging")]
         bevy::log::debug!("decision_engine: AI {:?} disabled by LOD - ignoring decision request.", audience);
+        // failure_messages.write(NoDecisionMessage {
+        //     entity: event.entity,
+        //     request_key: event.request_key.clone(),
+        //     comment: Some("Target LOD is below the processing threshold."),
+        // });
         return;
     }
     
@@ -222,6 +244,11 @@ pub fn decision_engine(
             // minimum, you'd have a SO with the key representing *the Controller itself*.
             #[cfg(feature = "logging")]
             bevy::log::debug!("decision_engine: AI {:?} - no SmartObjects available, idling", audience);
+            // failure_messages.write(NoDecisionMessage {
+            //     entity: event.entity,
+            //     request_key: event.request_key.clone(),
+            //     comment: Some("Target has no SmartObjects available."),
+            // });
             return;
         }
         Some(sos) => sos
@@ -494,14 +521,17 @@ pub fn decision_engine(
                                     &cons.consideration_name, 
                                     &res
                                 );
-                                // Uncomment if the panic! below is ever removed:
+                                // Uncomment if the expect-unwrap below is ever removed:
                                 // break;
-                                panic!("Consideration failed - lock poisoned!");
                             };
 
-                            res.unwrap()
+                            // Only really needed if we don't break on poisoned locks.
+                            res.expect("Consideration failed - lock poisoned!")
                         };
 
+                        // NOTE: As long as we panic on the lock poisoning, this is unreachable, 
+                        //       but I have a hunch someone will remove the panic and not handle 
+                        //       the error someday if we didn't account for this right now.
                         if res.is_err() {
                             curr_score = types::MIN_CONSIDERATION_SCORE - 1.;
                             break;
@@ -559,12 +589,30 @@ pub fn decision_engine(
                             }
                         };
 
+                        let true_span = true_max - true_min;
+                        if true_span == 0. {
+                            bevy::log::warn!(
+                                "Min/Max values for Consideration {:?} in Action {:?} 
+                                are both zero! min={:?}, max={:?}. 
+                                This would result in a division-by-zero and will instead be  
+                                interpreted as a disabled Consideration and ignored. If you did not  
+                                expect both values to be zero, you should investigate the Action spec.",
+                                cons.consideration_name,
+                                &action_template.name,
+                                cons.min,
+                                cons.max,
+                            );
+                            continue;
+                        }
+
                         // Remap the raw Consideration score (arbitrary value) to a unit interval. 
                         // Values outside of range get saturated to min/max (as appropriate), so 
                         // e.g. if min = -1 and raw_score = -5, we read the raw_score as just -1.
                         // Similarly if max = -4 and raw_score = -1, we read the raw_score as just -4.
-                        let rescaled_score = (raw_score - true_min).clamp(true_min, true_max) / (true_max - true_min);
+                        let clamped = raw_score.clamp(true_min, true_max);
+                        let rescaled_score = (clamped - true_min) / (true_max - true_min);
 
+                        // Apply the Curve mapping to the raw score.
                         let score = resolved_curve.sample_safe(rescaled_score);
 
                         // The actual (raw) score is the product of all Consideration scores so far.
@@ -675,7 +723,11 @@ pub fn decision_engine(
                 "decision_engine: AI {:?} - no suitable Actions found.",
                 &audience,
             );
-            panic!("decision_engine: AI {:?} - no suitable Actions found.", audience)
+            // failure_messages.write(NoDecisionMessage {
+            //     entity: event.entity,
+            //     request_key: event.request_key.clone(),
+            //     comment: Some("No suitable Actions found!"),
+            // });
         }
         Some(best_tuple) => {
             let (

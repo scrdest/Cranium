@@ -143,11 +143,13 @@ impl AcceptsContextFetcherRegistrations for World {
         let system = F::into_system(context_fetcher);
         let system_key = ContextFetcherIdentifier::from(key);
         let mut system_registry = self.get_resource_or_init::<ContextFetcherKeyToSystemMap>();            
+        
         let old = system_registry.mapping.insert(
             system_key.to_owned(), 
             Arc::new(CraniumRwLock::new(
                 system
             )));
+        
         match old {
             None => {},
             Some(_) => {
@@ -239,7 +241,7 @@ impl Plugin for ContextFetcherPlugin {
             .init_resource::<ContextFetcherKeyToSystemMap>()
             .add_systems(Startup, reinit_cf_queries)
             .add_systems(FixedFirst, reinit_cf_queries)
-            .add_observer(crate::decision_loop::disable_consideration_reinit)
+            .add_observer(crate::decision_loop::disable_cf_reinit)
         ;
     }
 }

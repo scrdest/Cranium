@@ -45,6 +45,7 @@ pub struct ActionSetStore {
 
 /// A collection of all SmartObjects an Entity has access to at the moment.
 #[derive(Component, Default, Reflect, Clone)]
+#[reflect(Component)]
 pub struct SmartObjects {
     pub actionset_refs: types::ActionSetsRef
 }
