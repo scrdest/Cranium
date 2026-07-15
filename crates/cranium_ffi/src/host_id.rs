@@ -58,13 +58,6 @@ pub enum NativeHostIdType {
 }
 
 impl NativeHostIdType {
-    // fn try_as_string(self) -> Option<String> {
-    //     match self {
-    //         Self::String(v) => Some(v),
-    //         _ => None
-    //     }
-    // }
-
     fn try_as_u64(self) -> Option<u64> {
         match self {
             Self::U64(v) => Some(v),

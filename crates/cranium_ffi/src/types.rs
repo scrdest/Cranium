@@ -8,7 +8,7 @@ use core::{ffi::CStr, fmt::Display, str::Utf8Error};
 use crate::{host_id::NativeHostIdType};
 
 // We need this import or Cargo complains about panic unwinding vOv
-use bevy::prelude::*;
+use bevy::{platform::sync::Arc, prelude::*};
 
 pub type RequestKey = cranium_core::types::RequestKey;
 
@@ -20,7 +20,7 @@ pub type FFIRawString = *const core::ffi::c_char;
 
 /// Alias for the standard Cranium representation of FFI string data safely 
 /// shepherded into the safe confines of Cranium's own invariants.
-pub type FFIIngestedString = String;
+pub type FFIIngestedString = Arc<String>;
 
 /// Turns a normal Rust &str into Cranium's FFI-friendly representation.
 /// 
@@ -37,6 +37,7 @@ pub unsafe fn ffi_raw_string_from_str_unchecked(inp: &str) -> FFIRawString {
         inp.as_bytes()
     )
     .map_err(|err| {
+        #[cfg(feature = "logging")]
         bevy::log::error!("Error converting Rust string {} to FFI string - {}", inp, err)
     })
     .map(|s| s.as_ptr())
@@ -48,12 +49,13 @@ pub unsafe fn ffi_raw_string_from_str_unchecked(inp: &str) -> FFIRawString {
 /// Primarily intended as a convenience for testing FFI calls from Rust 
 /// because it's a pretty gnarly piece of boilerplate in those scenarios. 
 pub fn ffi_raw_string_from_str(inp: &str) -> FFIRawString {
-    let padded_inp = format!("{}\0", inp);
-    unsafe { 
+    let padded_inp: &'static str = format!("{}\0", inp).leak();
+    let ffi_str = unsafe { 
         // SAFETY: we've manually added a terminator above, 
         // so there will always be at least one. 
         ffi_raw_string_from_str_unchecked(&padded_inp) 
-    }
+    };
+    ffi_str
 }
 
 /// Turns the FFIRawString into something slightly more Rust-palatable. 
@@ -69,7 +71,7 @@ pub unsafe fn ingest_string_from_ffi_raw_string<'a>(inp: FFIRawString) -> FFIIng
 pub unsafe fn try_ingest_string_from_ffi_raw_string<'a>(inp: FFIRawString) -> Result<FFIIngestedString, Utf8Error> {
     // We copy this over to an owned String ASAP to make sure nobody can mess up the data 
     // the pointer is pointer-ing to; after that point, we have ensured a nice safe value.
-    unsafe { core::ffi::CStr::from_ptr(inp) }.to_str().map(|s| s.to_string()) }
+    unsafe { core::ffi::CStr::from_ptr(inp) }.to_str().map(|s| Arc::new(s.to_string())) }
 
 
 /// A tiny reimplementation of Option<T> with a guaranteed repr(C) 
@@ -125,13 +127,12 @@ impl<T> Into<Option<T>> for FFIOption<T> {
 }
 
 
-/// A repr(C) enum of all possible state sync operations (Host -> Cranium only!)
-#[repr(C)]
+/// An enum of all possible state sync operations (Host -> Cranium only!)
 #[derive(Debug, Clone)]
 pub enum EntityOperation {
     UpsertEntity {
         host_id: NativeHostIdType,
-        components: String, 
+        components: Arc<String>, 
         request_key: RequestKey,
     },
 
@@ -191,6 +192,7 @@ pub enum ApiOutMsg {
     NoActionChosen {
         host_agent_id: NativeHostIdType, 
         request_key: RequestKey,
+        comment: FFIOption<FFIRawString>, 
     },
 
     // Feedback for Spawn ops
@@ -215,6 +217,17 @@ impl Display for ApiOutMsg {
                 f.write_str(&format!(
                     "EntityDespawnError(HostId: {:?}, RequestKey: {:?}, Error: '{}')",
                     id, rqkey, unsafe { CStr::from_ptr(*err) }.to_string_lossy()
+                ))
+            },
+            Self::NoActionChosen { host_agent_id, request_key, comment } => {
+                f.write_str(&format!(
+                    "NoActionChosen(HostId: {:?}, RequestKey: {:?}, Comment: '{}')",
+                    host_agent_id, 
+                    request_key, 
+                    match comment {
+                        FFIOption::Some(err) => unsafe { CStr::from_ptr(*err) }.to_str().unwrap_or_default(),
+                        FFIOption::None => "<none>"
+                    }
                 ))
             },
             _ => f.write_str(&format!("{:?}", self)),
@@ -251,15 +264,16 @@ pub enum StagedApiOutMsg {
     NoActionChosen {
         host_agent_id: NativeHostIdType, 
         request_key: RequestKey,
+        comment: Option<Arc<String>>,
     },
 
     // Feedback for Spawn ops
     EntitySpawnSuccessful(NativeHostIdType, RequestKey),
-    EntitySpawnError(NativeHostIdType, RequestKey, String), 
+    EntitySpawnError(NativeHostIdType, RequestKey, Arc<String>), 
 
     // Feedback for Despawn ops
     EntityDespawnSuccessful(FFIOption<NativeHostIdType>, RequestKey),
-    EntityDespawnError(FFIOption<NativeHostIdType>, RequestKey, String), 
+    EntityDespawnError(FFIOption<NativeHostIdType>, RequestKey, Arc<String>), 
 }
 
 impl Into<ApiOutMsg> for StagedApiOutMsg {
@@ -281,27 +295,36 @@ impl Into<ApiOutMsg> for StagedApiOutMsg {
                     request_key: request_key
                 }
             },
-            Self::NoActionChosen { host_agent_id, request_key } => {
-                ApiOutMsg::NoActionChosen { host_agent_id, request_key: request_key }
+            Self::NoActionChosen { host_agent_id, request_key, comment } => {
+                ApiOutMsg::NoActionChosen { 
+                    host_agent_id, 
+                    request_key, 
+                    comment: match comment {
+                        Some(v) => FFIOption::Some(ffi_raw_string_from_str(&v)),
+                        None => FFIOption::None
+                    } 
+                }
             },
             Self::EntitySpawnSuccessful(id, request_key) => {
                 ApiOutMsg::EntitySpawnSuccessful(id, request_key)
             },
             Self::EntitySpawnError(id, request_key, errmsg) => {
+                let ffi_string = ffi_raw_string_from_str(&errmsg);
                 ApiOutMsg::EntitySpawnError(
                     id, 
                     request_key, 
-                    ffi_raw_string_from_str(&errmsg)
+                    ffi_string, 
                 )
             },
             Self::EntityDespawnSuccessful(id, request_key) => {
                 ApiOutMsg::EntityDespawnSuccessful(id, request_key)
             },
             Self::EntityDespawnError(id, request_key, errmsg) => {
+                let ffi_string = ffi_raw_string_from_str(&errmsg);
                 ApiOutMsg::EntityDespawnError(
                     id, 
                     request_key, 
-                    ffi_raw_string_from_str(&errmsg)
+                    ffi_string,
                 )
             },
         }

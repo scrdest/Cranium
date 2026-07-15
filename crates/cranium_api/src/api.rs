@@ -6,6 +6,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use core::time::Duration;
 use core::{sync::atomic};
 
+use bevy::platform::sync::Arc;
 use bevy::prelude::*;
 
 use cranium_bevy_plugin::CraniumPlugin;
@@ -139,12 +140,10 @@ pub fn request_spawn<I: Into<NativeHostIdType>>(
     // As a UX convenience, spawning entities is treated as a heartbeat signal too.
     SHOULD_HEARTBEAT.store(true, atomic::Ordering::Release);
 
-    let component_string = components;
-
     let ops = vec![
         EntityOperation::UpsertEntity { 
             host_id: host_id.into(), 
-            components: component_string,
+            components: components,
             request_key: request_key,
         }
     ];
@@ -242,9 +241,8 @@ pub extern "C" fn cranium_write_ping() -> bool {
     write_ping()
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_spawn_u64(
-    host_id: u64, 
+fn request_spawn_logic<I: Into<NativeHostIdType>>(
+    host_id: I, 
     components: cranium_ffi::FFIRawString,
     request_key: RequestKey,
 ) -> bool {
@@ -253,6 +251,7 @@ pub extern "C" fn cranium_request_spawn_u64(
             request_spawn(host_id, safe_components, request_key)
         },
         Err(e) => {
+            #[cfg(feature = "logging")]
             bevy::log::error!("Error parsing Components spec {:?} for cranium_request_spawn_u64 - {:?}",
                 components,
                 e
@@ -263,19 +262,27 @@ pub extern "C" fn cranium_request_spawn_u64(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_spawn_u64(
+    host_id: u64, 
+    components: cranium_ffi::FFIRawString,
+    request_key: RequestKey,
+) -> bool {
+    request_spawn_logic(host_id, components, request_key)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn cranium_request_spawn_u32(host_id: u32, components: cranium_ffi::FFIRawString, request_key: RequestKey) -> bool {
-    match unsafe { cranium_ffi::try_ingest_string_from_ffi_raw_string(components) } {
-        Ok(safe_components) => {
-            request_spawn(host_id, safe_components, request_key)
-        },
-        Err(e) => {
-            bevy::log::error!("Error parsing Components spec {:?} for cranium_request_spawn_u32 - {:?}",
-                components,
-                e
-            );
-            false
-        }
-    }
+    request_spawn_logic(host_id, components, request_key)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_spawn_i32(host_id: i32, components: cranium_ffi::FFIRawString, request_key: RequestKey) -> bool {
+    request_spawn_logic(host_id, components, request_key)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_spawn_i64(host_id: i64, components: cranium_ffi::FFIRawString, request_key: RequestKey) -> bool {
+    request_spawn_logic(host_id, components, request_key)
 }
 
 #[unsafe(no_mangle)]
@@ -289,11 +296,31 @@ pub extern "C" fn cranium_request_despawn_u32(host_id: u32, request_key: Request
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_despawn_i32(host_id: i32, request_key: RequestKey) -> bool {
+    request_despawn(host_id, request_key)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_despawn_i64(host_id: i64, request_key: RequestKey) -> bool {
+    request_despawn(host_id, request_key)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn cranium_request_decision_u64(host_id: u64, request_key: RequestKey) -> bool {
     request_decision(host_id, request_key)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn cranium_request_decision_u32(host_id: u32, request_key: RequestKey) -> bool {
+    request_decision(host_id, request_key)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_decision_i32(host_id: i32, request_key: RequestKey) -> bool {
+    request_decision(host_id, request_key)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cranium_request_decision_i64(host_id: i64, request_key: RequestKey) -> bool {
     request_decision(host_id, request_key)
 }

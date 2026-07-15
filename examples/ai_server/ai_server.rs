@@ -54,10 +54,16 @@ unsafe extern "C" {
     safe fn cranium_write_ping() -> bool;
     safe fn cranium_request_spawn_u64(host_id: u64, components: *const core::ffi::c_char, request_key: RequestKey);
     safe fn cranium_request_spawn_u32(host_id: u32, components: *const core::ffi::c_char, request_key: RequestKey);
+    safe fn cranium_request_spawn_i32(host_id: i32, components: *const core::ffi::c_char, request_key: RequestKey);
+    safe fn cranium_request_spawn_i64(host_id: i64, components: *const core::ffi::c_char, request_key: RequestKey);
     safe fn cranium_request_despawn_u64(host_id: u64, request_key: RequestKey);
     safe fn cranium_request_despawn_u32(host_id: u32, request_key: RequestKey);
+    safe fn cranium_request_despawn_i32(host_id: i32, request_key: RequestKey);
+    safe fn cranium_request_despawn_i64(host_id: i64, request_key: RequestKey);
     safe fn cranium_request_decision_u64(host_id: u64, request_key: RequestKey);
     safe fn cranium_request_decision_u32(host_id: u32, request_key: RequestKey);
+    safe fn cranium_request_decision_i32(host_id: i32, request_key: RequestKey);
+    safe fn cranium_request_decision_i64(host_id: i64, request_key: RequestKey);
 }
 
 /// A trivial Rusty wrapper for the extern function to make thread::spawn happy.
@@ -112,7 +118,7 @@ fn main() {
                 // NOTE: This is only Unsafe because we have to ensure the nul-terminator is here.
                 cranium_ffi::ffi_raw_string_from_str_unchecked(
                     "{
-                        \"CraniumTestComponent\": {\"val\": 55},
+                        \"IntPosition2d\": {\"x\": 15, \"y\": -51},
                         \"AIController\": {}
                     }\0"
                 ) 
@@ -143,7 +149,7 @@ fn main() {
 
             cranium_request_spawn_u32(6, payload, 2);
             
-            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout(1000).into();
             if let Some(msg) = maybe_msg {
                 println!("Received a message: {}", msg);
             }
@@ -164,9 +170,47 @@ fn main() {
 
         if ctr == 4 {
             println!("Sending a RequestKey=4 ID=5 (u64), AI Decision request...");
-            let request_key = 4;
+            cranium_request_decision_u64(5, 4u64);
 
-            cranium_request_decision_u64(5, request_key);
+            // We absolutely can send multiple requests in one tick too:
+            println!("Sending a valid spawn RequestKey=9001 ID=-1009 (i32) request...");
+            cranium_request_spawn_i32(
+                -1009, 
+                cranium_ffi::ffi_raw_string_from_str(
+                    "{
+                        \"IntPosition2d\": {\"x\": 15, \"y\": -51},
+                        \"AIController\": {}
+                    }\0"
+                ), 
+                9001
+            );
+
+            println!("Sending a valid spawn RequestKey=1009 ID=-9001 (i64) request...");
+            cranium_request_spawn_i64(
+                -9001, 
+                cranium_ffi::ffi_raw_string_from_str(
+                    "{
+                        \"IntPosition2d\": {\"x\": 15, \"y\": -51},
+                        \"AIController\": {}
+                    }\0"
+                ),
+                1009
+            );
+            
+            // We've sent multiple requests, so we'll await multiple responses.
+            // 
+            // The responses may arrive out-of-order depending on when the underlying Systems run. 
+            // So, do NOT rely on the order of sends and receives - that's what Request Keys are for. 
+            // E.g. a Response carrying a Request Key=1 is addressing a Request with Request Key=1.
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {}", msg);
+            }
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {}", msg);
+            }
             
             let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
             if let Some(msg) = maybe_msg {
@@ -178,6 +222,45 @@ fn main() {
             println!("Sending a despawn, RequestKey=555 ID=5 (u64) request...");
 
             cranium_request_despawn_u64(5, 555);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {}", msg);
+            }
+        }
+
+        if ctr == 6 {
+            println!("Sending a RequestKey=1337 ID=9001 (u32), AI Decision request...");
+            cranium_request_decision_u32(9001u32, 1337);
+            
+            println!("Sending a RequestKey=1234 ID=-1009 (i32), AI Decision request...");
+            cranium_request_decision_i32(-1009, 7332);
+            
+            println!("Sending a RequestKey=7332 ID=-9001 (i64), AI Decision request...");
+            cranium_request_decision_i64(-9001, 2337);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {}", msg);
+            }
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {}", msg);
+            }
+        }
+
+        if ctr == 7 {
+            println!("Sending a Despawn RequestKey=70707 ID=-1009 (i32), AI Decision request...");
+            cranium_request_despawn_i32(-1009, 70707);
+            
+            println!("Sending a Despawn RequestKey=80808 ID=-9001 (i64), AI Decision request...");
+            cranium_request_despawn_i64(-9001, 80808);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {}", msg);
+            }
             
             let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
             if let Some(msg) = maybe_msg {

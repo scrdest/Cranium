@@ -25,10 +25,12 @@ use cranium_core::smart_object::SmartObjects;
 pub struct CraniumApiTypesRegistrationPlugin;
 
 
+/// A basic 2D vector struct, mainly used to showcase a non-AI dyn-spawnable Component
 #[derive(Component, Reflect, serde::Serialize, serde::Deserialize)]
 #[reflect(Component)]
-pub struct CraniumTestComponent {
-    val: u64
+pub struct IntPosition2d {
+    x: i64,
+    y: i64,
 }
 
 
@@ -38,6 +40,6 @@ impl Plugin for CraniumApiTypesRegistrationPlugin {
         app.register_type::<AILevelOfDetail>();
         app.register_type::<Pawn>();
         app.register_type::<SmartObjects>();
-        app.register_type::<CraniumTestComponent>();
+        app.register_type::<IntPosition2d>();
     }
 }

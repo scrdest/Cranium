@@ -6,6 +6,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 // Needed in-scope for insert_reflect() call
 use bevy::ecs::reflect::ReflectCommandExt;
 
+use bevy::platform::sync::Arc;
 // We need this import or Cargo complains about panic unwinding vOv
 use bevy::prelude::*;
 
@@ -71,7 +72,7 @@ pub struct HostSpawnRequestParams(bevy::platform::collections::HashMap<String, V
 /// based on the results (i.e. - if we already track this Host ID -> update, else insert). 
 #[derive(Debug, Message)]
 pub struct HostSpawnRequestMsg<I: HostIdType> {
-    pub payload: String,
+    pub payload: Arc<String>,
     pub host_id: I,
     pub request_key: RequestKey,
 }
@@ -81,14 +82,14 @@ pub struct HostSpawnRequestMsg<I: HostIdType> {
 pub struct HostSpawnResponseSuccessMsg<I: HostIdType> {
     pub entity: Entity,
     pub host_id: I,
-    pub comments: Option<String>,
+    pub comments: Option<Arc<String>>,
     pub request_key: RequestKey,
 }
 
 /// Signals a bad Spawn request - consumed and re-emitted to the output channel as feedback.
 #[derive(Debug, Message)]
 pub struct HostSpawnResponseErrorMsg<I: HostIdType> {
-    pub error: String,
+    pub error: Arc<String>,
     pub host_id: I,
     pub request_key: RequestKey,
 }
@@ -113,6 +114,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
     let success_messages = request_stream.read_with_id().filter_map(|(request, request_id)| {
         // IN THEORY we could do all of this in One Big Pipeline with a bunch of and_then()s.
         // However, this is broken down into three logical steps for better legibility.
+        #[cfg(feature = "logging")]
         bevy::log::debug!(
             "Processing an Entity Spawn Request (RqID: {}, HostId: {:?})...", 
             request_id,
@@ -123,6 +125,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
         let parsed: Option<HostSpawnRequestParams> = 
             serde_json::from_str(&request.payload)
             .map_err(|err| {
+                #[cfg(feature = "logging")]
                 bevy::log::error!(
                     "Error parsing Cranium Entity Spawn Request (RqID: {}, HostId: {:?}, Msg: '{}') - {}", 
                     request_id, 
@@ -131,7 +134,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                     err,
                 );
                 error_response_stream.write(HostSpawnResponseErrorMsg { 
-                    error: err.to_string(), 
+                    error: Arc::new(err.to_string()), 
                     host_id: request.host_id.clone(),
                     request_key: request.request_key.clone(),
                 });
@@ -144,9 +147,10 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
         .and_then(|comp| {
             deserialize_components(&type_registry, comp)
             .map_err(|e| {
+                #[cfg(feature = "logging")]
                 bevy::log::error!("Error deserializing Components from a Spawn API request (RqID: {}, HostId: {:?}): {:?}", request_id, request.host_id, e); 
                 error_response_stream.write(HostSpawnResponseErrorMsg { 
-                    error: e, 
+                    error: Arc::new(e), 
                     host_id: request.host_id.clone(), 
                     request_key: request.request_key.clone(), 
                 });
@@ -167,6 +171,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                 },
                 Some(&e) => commands.get_entity(e).map_err(
                     |err| {
+                        #[cfg(feature = "logging")]
                         bevy::log::error!("Invalid Entity {} (HostId: {:?}) retrieved from the HostIdToEntityRegistry - {}", e, request.host_id, err);
                         err
                     }, 
@@ -194,21 +199,27 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
             insert_reflected_components(entity, reflect_components)
             .map_err(|e| {
                 match is_update {
-                    true => bevy::log::error!(
-                        "Error updating Components from a Spawn API request (RqID: {}, HostId {:?}): {:?}", 
-                        request_id, 
-                        request.host_id,
-                        e
-                    ),
-                    false => bevy::log::error!(
-                        "Error inserting Components from a Spawn API request (RqID: {}, HostId {:?}): {:?}", 
-                        request_id, 
-                        request.host_id,
-                        e
-                    )
+                    true => {
+                        #[cfg(feature = "logging")]
+                        bevy::log::error!(
+                            "Error updating Components from a Spawn API request (RqID: {}, HostId {:?}): {:?}", 
+                            request_id, 
+                            request.host_id,
+                            e
+                        )
+                    },
+                    false => {
+                        #[cfg(feature = "logging")]
+                        bevy::log::error!(
+                            "Error inserting Components from a Spawn API request (RqID: {}, HostId {:?}): {:?}", 
+                            request_id, 
+                            request.host_id,
+                            e
+                        )
+                    }
                 }
                 error_response_stream.write(HostSpawnResponseErrorMsg { 
-                    error: e, 
+                    error: Arc::new(e), 
                     host_id: request.host_id.clone(),
                     request_key: request.request_key.clone(),
                 });
@@ -216,18 +227,24 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
             .ok()
             .and_then(|_| {
                 match is_update {
-                    false => bevy::log::debug!(
-                        "Successfully spawned an Entity ({}, HostId {:?}) with Components based on Spawn request (RqID: {})", 
-                        entity_id, 
-                        request.host_id,
-                        request_id,
-                    ),
-                    true => bevy::log::debug!(
-                        "Successfully updated an Entity ({}, HostId {:?}) with Components based on Spawn request (RqID: {})", 
-                        entity_id, 
-                        request.host_id,
-                        request_id,
-                    ),
+                    false => {
+                        #[cfg(feature = "logging")]
+                        bevy::log::debug!(
+                            "Successfully spawned an Entity ({}, HostId {:?}) with Components based on Spawn request (RqID: {})", 
+                            entity_id, 
+                            request.host_id,
+                            request_id,
+                        )
+                    },
+                    true => {
+                        #[cfg(feature = "logging")]
+                        bevy::log::debug!(
+                            "Successfully updated an Entity ({}, HostId {:?}) with Components based on Spawn request (RqID: {})", 
+                            entity_id, 
+                            request.host_id,
+                            request_id,
+                        )
+                    }
                 }
                 
                 Some(HostSpawnResponseSuccessMsg {
@@ -257,6 +274,7 @@ pub(crate) fn forward_spawn_success_signals(
                 msg.host_id.clone(), 
                 msg.request_key.clone(),
             );
+            #[cfg(feature = "logging")]
             bevy::log::debug!("Queuing up a EntitySpawnSuccessful Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
         }
@@ -278,6 +296,7 @@ pub(crate) fn forward_spawn_error_signals(
                 msg.request_key.clone(),
                 msg.error.clone(),
             );
+            #[cfg(feature = "logging")]
             bevy::log::debug!("Queuing up a EntitySpawnError Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
         }
@@ -290,7 +309,7 @@ pub(crate) fn forward_spawn_error_signals(
 pub struct HostDespawnResponseSuccessMsg<I: HostIdType> {
     pub entity: Entity,
     pub host_id: Option<I>,
-    pub comments: Option<String>,
+    pub comments: Option<Arc<String>>,
     pub request_key: RequestKey,
 }
 
@@ -298,7 +317,7 @@ pub struct HostDespawnResponseSuccessMsg<I: HostIdType> {
 #[derive(Debug, Message)]
 pub struct HostDespawnResponseErrorMsg<I: HostIdType> {
     pub host_id: Option<I>,
-    pub error: String,
+    pub error: Arc<String>,
     pub request_key: RequestKey,
 }
 
@@ -310,6 +329,7 @@ pub(crate) fn host_entity_removal_request_processor<T: HostIdType + 'static> (
 ) {
     let removals = msg_reader.read_with_id().filter_map(
         |(msg, msg_id)| {
+            #[cfg(feature = "logging")]
             bevy::log::debug!(
                 "Processing HostEntityRequestRemovalMessage (ID: {:?}) - Target: {:?}",
                 msg_id,
@@ -320,7 +340,7 @@ pub(crate) fn host_entity_removal_request_processor<T: HostIdType + 'static> (
                 .or_else(|| {
                     err_writer.write(HostDespawnResponseErrorMsg { 
                         host_id: Some(msg.target_host_id.clone()), 
-                        error: "Target entity does not exist!".to_string(), 
+                        error: Arc::new("Target entity does not exist!".to_string()), 
                         request_key: msg.request_key, 
                     });
                     None
@@ -348,6 +368,7 @@ pub(crate) fn host_entity_removal_executor<T: HostIdType + 'static> (
     // TODO: in theory we should have an error message too, but there is no way for this to fail rn
 ) {
     let msgs = msg_reader.read_with_id().filter_map(|(msg, msg_id)| {
+        #[cfg(feature = "logging")]
         bevy::log::debug!(
             "Processing HostEntityRemovalTriggered message (ID: {:?}) - Entity: {:?}",
             msg_id,
@@ -363,6 +384,7 @@ pub(crate) fn host_entity_removal_executor<T: HostIdType + 'static> (
 
         match entity_match {
             Err(err) => {
+                #[cfg(feature = "logging")]
                 bevy::log::error!(
                     "Failed to match an Entity ({:?}) for despawn - {:?}",
                     msg.entity,
@@ -371,6 +393,7 @@ pub(crate) fn host_entity_removal_executor<T: HostIdType + 'static> (
                 None
             },
             Ok(_) => {
+                #[cfg(feature = "logging")]
                 bevy::log::debug!(
                     "Successfully matched an Entity ({:?}) for despawn...",
                     msg.entity,
@@ -390,6 +413,7 @@ pub(crate) fn host_entity_removal_executor<T: HostIdType + 'static> (
                 to_hostmapping.0.remove(&msg.entity);
 
                 host_id.and_then(|hostid| {
+                    #[cfg(feature = "logging")]
                     bevy::log::debug!(
                         "Successfully removed entity {:?} (HostId: {:?}). Sending success message...",
                         msg.entity,
@@ -422,6 +446,7 @@ pub(crate) fn forward_despawn_success_signals(
                 msg.host_id.clone().into(),
                 msg.request_key
             );
+            #[cfg(feature = "logging")]
             bevy::log::debug!("Queuing up a EntityDespawnSuccessful Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
         }
@@ -443,6 +468,7 @@ pub(crate) fn forward_despawn_error_signals(
                 msg.request_key, 
                 msg.error.clone(), 
             );
+            #[cfg(feature = "logging")]
             bevy::log::debug!("Queuing up a EntitySpawnError Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
         }

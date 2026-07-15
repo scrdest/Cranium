@@ -125,6 +125,7 @@ fn check_heartbeat_system(
     let delta = now - last_tick;
 
     if delta > timeout {
+        #[cfg(feature = "logging")]
         bevy::log::error!(
             "Cranium received no heartbeat in more than {:?}s (delta:{:?}s, last update time: {:?}s), quitting!", 
             timeout.as_secs(), delta.as_secs(), last_tick.as_secs()

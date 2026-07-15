@@ -104,19 +104,23 @@ pub(crate) fn process_input_messages(
     mut upsert_rq_writer: MessageWriter<spawn::HostSpawnRequestMsg<NativeHostIdType>>,
 ) {
     in_channel.receiver.try_iter().enumerate().for_each(|(i, msg)| {
+        #[cfg(feature = "logging")]
         bevy::log::debug!("Received input message {:?} - {:?}", i, msg);
         match msg {
             ApiInMsg::Ping => {
                 message_queue.write(QueuedApiOutMessage(StagedApiOutMsg::Pong));
+                #[cfg(feature = "logging")]
                 bevy::log::debug!("Queued up a Pong response");
             },
 
             ApiInMsg::Shutdown => {
+                #[cfg(feature = "logging")]
                 bevy::log::debug!("Cranium exiting on host's request..."); 
                 exit_writer.write(AppExit::Success);
             },
 
             ApiInMsg::SyncBatch { ops } => {
+                #[cfg(feature = "logging")]
                 bevy::log::debug!("Processing an inbound batch of operations..."); 
                 ops.iter().for_each(
                     |raw_op| {
@@ -139,7 +143,7 @@ pub(crate) fn process_input_messages(
                                 upsert_rq_writer.write(spawn::HostSpawnRequestMsg { 
                                     host_id: host_id.clone(), 
                                     payload: components.clone(), 
-                                    request_key: request_key.clone(),
+                                    request_key: *request_key,
                                 });
                             }
                         }
@@ -175,9 +179,11 @@ pub(crate) fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
 
         match result {
             Ok(_) => {
+                #[cfg(feature = "logging")]
                 bevy::log::debug!("Sent a message (ID: {}) to the API output channel - {:?}", msg_id, queued_msg);
             }
             Err(err) => {
+                #[cfg(feature = "logging")]
                 bevy::log::error!("Failed to send a message (ID: {}) to the API output channel - Error: {}", msg_id, err);
                 // Stop processing messages on the first failure; we'll get 'em next time!
                 break;
@@ -242,6 +248,7 @@ pub(crate) fn decision_requested_msg_handler<I: HostIdType + 'static>(
         .0.get(&msg.target)
         .map_or_else(
             || {
+                #[cfg(feature = "logging")]
                 bevy::log::error!("Decision requested for an unrecognized/untracked Entity! MsgId: {:?} | RqKey: {:?} | HostId: {:?}", 
                     msg_id, 
                     msg.request_key, 
@@ -257,6 +264,7 @@ pub(crate) fn decision_requested_msg_handler<I: HostIdType + 'static>(
                 
                 match smart_objects {
                     Some(sos) => {
+                        #[cfg(feature = "logging")]
                         bevy::log::debug!(
                             "Triggered a Decision request for Entity {} with {} SmartObject ActionSets.", 
                             local_entity,
@@ -270,6 +278,7 @@ pub(crate) fn decision_requested_msg_handler<I: HostIdType + 'static>(
                     },
 
                     None => {
+                        #[cfg(feature = "logging")]
                         bevy::log::debug!(
                             "Ignored a Decision request for Entity {} - no SmartObjects available.", 
                             local_entity,
@@ -322,6 +331,7 @@ impl<I: HostIdType + 'static> HostActionIdMap<I> {
         self.key_to_host_id_map
             .insert(arc_action_key.clone(), arc_host_id.clone())
             .map(|old| {
+                #[cfg(feature = "logging")]
                 bevy::log::warn!(
                     "HostActionIdMap insert of ActionKey '{:?}'->'{:?}' is overwriting a previous HostId mapping '{:?}'",
                     arc_action_key.as_ref(),
@@ -334,6 +344,7 @@ impl<I: HostIdType + 'static> HostActionIdMap<I> {
         self.host_id_to_key_map
             .insert(arc_host_id.clone(), arc_action_key.clone())
             .map(|old| {
+                #[cfg(feature = "logging")]
                 bevy::log::warn!(
                     "HostActionIdMap insert of HostId '{:?}'->'{:?}' is overwriting a previous ActionKey mapping '{:?}'",
                     arc_host_id.as_ref(),
@@ -363,6 +374,7 @@ pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
     let host_mapped_agent_id = query.get(tgt).and_then(|comp| {
         Ok(comp.host_id.clone())
     }).map_err(|err| {
+        #[cfg(feature = "logging")]
         bevy::log::error!(
             "decision_output_handler - failed to locate a HostMapped component on the AiActionPicked Target {:?}.
             Error: '{}'.  
@@ -375,6 +387,7 @@ pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
     let host_mapped_context = query.get(trigger.action_context).and_then(|comp| {
         Ok(comp.host_id.clone())
     }).map_err(|err| {
+        #[cfg(feature = "logging")]
         bevy::log::error!(
             "decision_output_handler - failed to locate a HostMapped component on the AiActionPicked Context {:?}. 
             Error: '{}'. 
@@ -385,6 +398,7 @@ pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
     });
 
     let host_mapped_action = host_action_id_registry.get_host_id(&trigger.action_key).or_else(|| {
+        #[cfg(feature = "logging")]
         bevy::log::error!(
             "decision_output_handler - failed to match a HostId for an AiActionPicked Action {:?}. 
             ActionChosen message will not be send due to invariant violation. ",
@@ -428,7 +442,8 @@ pub fn decision_failed_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
         QueuedApiOutMessage(
             StagedApiOutMsg::NoActionChosen { 
                 host_agent_id: host_mapped_agent_id.into(), 
-                request_key: msg.request_key.unwrap_or_default()
+                request_key: msg.request_key.unwrap_or_default(),
+                comment: msg.comment.map(|m| Arc::new(m.to_string())),
             },
         )
     })
@@ -453,11 +468,17 @@ pub fn check_output_channel_for_clogs(
         match out_channel.pop_messages {
             true => {
                 // Pop a message from the channel to hopefully unclog it.
+                #[cfg(feature = "logging")]
                 bevy::log::warn!("Cranium output channel clogged! Attempting a receive...");
-                let _ = out_channel.receiver.recv();
+                let drop_msg = out_channel.receiver.recv();
+                if let Ok(dropped) = drop_msg {
+                    #[cfg(feature = "logging")]
+                    bevy::log::warn!("Output unclog: dropping message {:?}", dropped)
+                };
             },
             false => {
                 // Just alert that we're full up.
+                #[cfg(feature = "logging")]
                 bevy::log::warn!(
                     "Cranium output channel clogged! Messages will not be produced until some have been received!"
                 );
