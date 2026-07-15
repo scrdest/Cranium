@@ -4,28 +4,42 @@ If a copy of the MPL was not distributed with this file,
 You can obtain one at https://mozilla.org/MPL/2.0/. 
 */
 
+use core::marker::PhantomData;
+
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use crossbeam_channel;
-use cranium_ffi::{ApiInMsg, ApiOutMsg, NativeHostIdType};
+use cranium_ffi::{ApiInMsg, StagedApiOutMsg, HostIdType, NativeHostIdType};
 
 use crate::spawn;
 use crate::channels::*;
-use crate::spawn::host_entity_removal_executor;
-use crate::spawn::host_entity_removal_request_processor;
+
 
 /// A Plugin that adds Channels for communication between Bevy worlds and external code.
 #[derive(Default)]
-pub struct ApiChannelsPlugin {
+pub struct ApiChannelsPlugin<I: HostIdType> {
     in_channel_bound: Option<usize>,
     out_channel_bound: Option<usize>,
+    host_id_type: PhantomData<I>,
 }
 
-impl ApiChannelsPlugin {
+impl<I: HostIdType> ApiChannelsPlugin<I> {
+    // This is roughly equivalent to a P::default() call, but if the generic 'I' 
+    // type does not implement Default (and NativeHostId does not, for example), 
+    // we cannot use P::default() for the job. 
+    pub fn with_default_bounds() -> Self {
+        Self {
+            in_channel_bound: None,
+            out_channel_bound: None,
+            host_id_type: PhantomData,
+        }
+    }
+
     pub fn with_bounds(in_bound: Option<usize>, out_bound: Option<usize>) -> Self {
         Self {
             in_channel_bound: in_bound,
             out_channel_bound: out_bound,
+            host_id_type: PhantomData,
         }
     }
 
@@ -33,12 +47,14 @@ impl ApiChannelsPlugin {
         Self {
             in_channel_bound: bounds.map(|b| b.0),
             out_channel_bound: bounds.map(|b| b.1),
+            host_id_type: PhantomData,
         }
     }
 }
 
 
-impl Plugin for ApiChannelsPlugin {
+// TODO: Remove the Into<NativeHostIdType> bound - currently needed because FFI types require NativeHostIdType.
+impl<I: HostIdType + 'static + Into<NativeHostIdType>> Plugin for ApiChannelsPlugin<I> {
     fn build(&self, app: &mut App) {
         // Wire up the input channel...
         let in_bound = self.in_channel_bound.unwrap_or(DEFAULT_IN_CHANNEL_BOUND);
@@ -53,26 +69,26 @@ impl Plugin for ApiChannelsPlugin {
 
         // ...and the output channel.
         let out_bound = self.out_channel_bound.unwrap_or(DEFAULT_OUT_CHANNEL_BOUND);
-        let (out_snd, out_rcv) = crossbeam_channel::bounded::<ApiOutMsg>(out_bound);
+        let (out_snd, out_rcv) = crossbeam_channel::bounded::<StagedApiOutMsg>(out_bound);
         let channel_result = OUT_CHANNEL.set(out_rcv.clone());
         
         channel_result.expect("ApiChannelsPlugin OUT_CHANNEL is already initialized (somehow)!");
 
-        let start_sent = out_snd.send(ApiOutMsg::CraniumStarted);
+        let start_sent = out_snd.send(StagedApiOutMsg::CraniumStarted);
         start_sent.expect("Failed to send initial message on the OUT channel.");
         
         // Resources for handling output channel stuff.
         app.insert_resource(ApiOutputChannel { sender: out_snd });
-        app.insert_resource(ApiOutputChannelMaintenance { receiver: out_rcv });
+        app.insert_resource(ApiOutputChannelMaintenance { receiver: out_rcv, pop_messages: true });
 
         // Resources for mapping Host IDs to Cranium IDs and back.
-        let from_host_id_reg: HashMap<NativeHostIdType, Entity> = HashMap::new();
-        let to_host_id_reg: HashMap<Entity, NativeHostIdType> = HashMap::new();
+        let from_host_id_reg: HashMap<I, Entity> = HashMap::new();
+        let to_host_id_reg: HashMap<Entity, I> = HashMap::new();
         app.insert_resource(HostIdToEntityRegistry(from_host_id_reg));
         app.insert_resource(EntityToHostIdRegistry(to_host_id_reg));
 
         // Same, but for ActionKeys rather than Entities
-        let host_action_id_map: HostActionIdMap<NativeHostIdType> = HostActionIdMap {
+        let host_action_id_map: HostActionIdMap<I> = HostActionIdMap {
             key_to_host_id_map: HashMap::new(),
             host_id_to_key_map: HashMap::new(),
         };
@@ -96,22 +112,19 @@ impl Plugin for ApiChannelsPlugin {
 
         // Entity removal core pipeline.
         // 
-        // Note that the plugin only covers the NativeHostIdType impl - if users want to use their own custom 
-        // Host ID types, they will need to write their own plugin/app setup to add analogous Systems for that.
-        // 
-        // Also note that those are ultimately processors on a Message bus - by design, you can hook up 
+        // Note that those are ultimately processors on a Message bus - by design, you can hook up 
         // additional consumer Systems to these buses to add additional handling for Host entity removals. 
-        app.add_systems(PreUpdate, host_entity_removal_request_processor::<NativeHostIdType>);
+        app.add_systems(PreUpdate, spawn::host_entity_removal_request_processor::<I>);
         
         app.add_message::<HostEntityRemovalTriggered>();
-        app.add_message::<HostEntityRequestRemovalMessage<NativeHostIdType>>();
-        app.add_message::<spawn::HostDespawnResponseSuccessMsg<NativeHostIdType>>();
-        app.add_message::<spawn::HostDespawnResponseErrorMsg<NativeHostIdType>>();
+        app.add_message::<HostEntityRequestRemovalMessage<I>>();
+        app.add_message::<spawn::HostDespawnResponseSuccessMsg<I>>();
+        app.add_message::<spawn::HostDespawnResponseErrorMsg<I>>();
 
         app.add_systems(
             Last, 
             (
-                spawn::host_entity_removal_executor::<NativeHostIdType>,
+                spawn::host_entity_removal_executor::<I>,
                 (
                     spawn::forward_despawn_error_signals,
                     spawn::forward_despawn_success_signals,
@@ -119,20 +132,17 @@ impl Plugin for ApiChannelsPlugin {
             ).chain()
         );
 
-        // Entity upsert core pipeline.
+        // Entity upsert core pipeline. 
         // 
-        // Note that the plugin only covers the NativeHostIdType impl - if users want to use their own custom 
-        // Host ID types, they will need to write their own plugin/app setup to add analogous Systems for that. 
-        // 
-        // Also note that those are ultimately processors on a Message bus - by design, you can hook up 
+        // Note that those are ultimately processors on a Message bus - by design, you can hook up 
         // additional consumer Systems to these buses to add additional handling for Host entity upserts. 
-        app.add_message::<spawn::HostSpawnRequestMsg<NativeHostIdType>>();
-        app.add_message::<spawn::HostSpawnResponseSuccessMsg<NativeHostIdType>>();
-        app.add_message::<spawn::HostSpawnResponseErrorMsg<NativeHostIdType>>();
+        app.add_message::<spawn::HostSpawnRequestMsg<I>>();
+        app.add_message::<spawn::HostSpawnResponseSuccessMsg<I>>();
+        app.add_message::<spawn::HostSpawnResponseErrorMsg<I>>();
         app.add_systems(
             PreUpdate, 
             (
-                spawn::process_remote_spawn_entity_request::<NativeHostIdType>,
+                spawn::process_remote_spawn_entity_request::<I>,
                 (
                     spawn::forward_spawn_error_signals,
                     spawn::forward_spawn_success_signals,
@@ -141,11 +151,11 @@ impl Plugin for ApiChannelsPlugin {
         );
 
         // Async decision request/response handling.
-        app.add_message::<DecisionRequestedMsg::<NativeHostIdType>>();
+        app.add_message::<DecisionRequestedMsg::<I>>();
         app.add_message::<cranium_core::events::NoDecisionMessage>();
-        app.add_systems(PreUpdate, decision_requested_msg_handler::<NativeHostIdType>);
-        app.add_observer(decision_output_handler::<NativeHostIdType>);
-        app.add_systems(PostUpdate, decision_failed_handler::<NativeHostIdType>);
+        app.add_systems(PreUpdate, decision_requested_msg_handler::<I>);
+        app.add_systems(PostUpdate, decision_failed_handler::<I>);
+        app.add_observer(decision_output_handler::<I>);
 
         // Add common type registrations
         // TODO: Consider making this opt-in only.

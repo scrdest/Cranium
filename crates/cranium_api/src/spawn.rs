@@ -13,7 +13,7 @@ use bevy::reflect::{
     serde::TypedReflectDeserializer,
 };
 
-use cranium_ffi::{HostIdType, HostMapped, NativeHostIdType};
+use cranium_ffi::{HostIdType, HostMapped, NativeHostIdType, RequestKey};
 use serde_json::Value;
 use serde::de::DeserializeSeed;
 
@@ -73,6 +73,7 @@ pub struct HostSpawnRequestParams(bevy::platform::collections::HashMap<String, V
 pub struct HostSpawnRequestMsg<I: HostIdType> {
     pub payload: String,
     pub host_id: I,
+    pub request_key: RequestKey,
 }
 
 /// Signals a successful Spawn request  - consumed and re-emitted to the output channel as feedback.
@@ -81,6 +82,7 @@ pub struct HostSpawnResponseSuccessMsg<I: HostIdType> {
     pub entity: Entity,
     pub host_id: I,
     pub comments: Option<String>,
+    pub request_key: RequestKey,
 }
 
 /// Signals a bad Spawn request - consumed and re-emitted to the output channel as feedback.
@@ -88,6 +90,7 @@ pub struct HostSpawnResponseSuccessMsg<I: HostIdType> {
 pub struct HostSpawnResponseErrorMsg<I: HostIdType> {
     pub error: String,
     pub host_id: I,
+    pub request_key: RequestKey,
 }
 
 // Completing the unholy trinity of copypasta, the actual handler using both of the above.
@@ -127,7 +130,11 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                     request.payload,
                     err,
                 );
-                error_response_stream.write(HostSpawnResponseErrorMsg { error: err.to_string(), host_id: request.host_id.clone() });
+                error_response_stream.write(HostSpawnResponseErrorMsg { 
+                    error: err.to_string(), 
+                    host_id: request.host_id.clone(),
+                    request_key: request.request_key.clone(),
+                });
             }
         ).ok();
 
@@ -138,7 +145,11 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
             deserialize_components(&type_registry, comp)
             .map_err(|e| {
                 bevy::log::error!("Error deserializing Components from a Spawn API request (RqID: {}, HostId: {:?}): {:?}", request_id, request.host_id, e); 
-                error_response_stream.write(HostSpawnResponseErrorMsg { error: e, host_id: request.host_id.clone() });
+                error_response_stream.write(HostSpawnResponseErrorMsg { 
+                    error: e, 
+                    host_id: request.host_id.clone(), 
+                    request_key: request.request_key.clone(), 
+                });
             })
             .ok()
         });
@@ -196,7 +207,11 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                         e
                     )
                 }
-                error_response_stream.write(HostSpawnResponseErrorMsg { error: e, host_id: request.host_id.clone() });
+                error_response_stream.write(HostSpawnResponseErrorMsg { 
+                    error: e, 
+                    host_id: request.host_id.clone(),
+                    request_key: request.request_key.clone(),
+                });
             })
             .ok()
             .and_then(|_| {
@@ -219,6 +234,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                     entity: entity_id, 
                     host_id: request.host_id.clone(), 
                     comments: None,
+                    request_key: request.request_key.clone(),
                 })
             })
         });
@@ -237,7 +253,10 @@ pub(crate) fn forward_spawn_success_signals(
     let transformed_msgs = success_messages
         .read()
         .map(|msg| {
-            let out_msg = cranium_ffi::ApiOutMsg::EntitySpawnSuccessful(msg.host_id.clone());
+            let out_msg = cranium_ffi::StagedApiOutMsg::EntitySpawnSuccessful(
+                msg.host_id.clone(), 
+                msg.request_key.clone(),
+            );
             bevy::log::debug!("Queuing up a EntitySpawnSuccessful Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
         }
@@ -254,8 +273,10 @@ pub(crate) fn forward_spawn_error_signals(
     let transformed_msgs = success_messages
         .read()
         .map(|msg| {
-            let out_msg = cranium_ffi::ApiOutMsg::EntitySpawnError(
+            let out_msg = cranium_ffi::StagedApiOutMsg::EntitySpawnError(
                 msg.host_id.clone(),
+                msg.request_key.clone(),
+                msg.error.clone(),
             );
             bevy::log::debug!("Queuing up a EntitySpawnError Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
@@ -270,20 +291,22 @@ pub struct HostDespawnResponseSuccessMsg<I: HostIdType> {
     pub entity: Entity,
     pub host_id: Option<I>,
     pub comments: Option<String>,
+    pub request_key: RequestKey,
 }
 
 /// Signals a bad Spawn request - consumed and re-emitted to the output channel as feedback.
 #[derive(Debug, Message)]
 pub struct HostDespawnResponseErrorMsg<I: HostIdType> {
-    pub entity: Entity,
     pub host_id: Option<I>,
     pub error: String,
+    pub request_key: RequestKey,
 }
 
 pub(crate) fn host_entity_removal_request_processor<T: HostIdType + 'static> (
     mapping_registry: Res<HostIdToEntityRegistry<T>>, 
     mut msg_reader: MessageReader<HostEntityRequestRemovalMessage<T>>,
     mut msg_writer: MessageWriter<HostEntityRemovalTriggered>,
+    mut err_writer: MessageWriter<HostDespawnResponseErrorMsg<T>>,
 ) {
     let removals = msg_reader.read_with_id().filter_map(
         |(msg, msg_id)| {
@@ -292,9 +315,23 @@ pub(crate) fn host_entity_removal_request_processor<T: HostIdType + 'static> (
                 msg_id,
                 msg.target_host_id
             );
-            mapping_registry.0.get(&msg.target_host_id)
+            mapping_registry.0
+                .get(&msg.target_host_id)
+                .or_else(|| {
+                    err_writer.write(HostDespawnResponseErrorMsg { 
+                        host_id: Some(msg.target_host_id.clone()), 
+                        error: "Target entity does not exist!".to_string(), 
+                        request_key: msg.request_key, 
+                    });
+                    None
+                }
+            )
+            .map(|entity| HostEntityRemovalTriggered { 
+                entity: *entity,
+                request_key: msg.request_key,
+            })
         }
-    ).map(|entity| HostEntityRemovalTriggered { entity: *entity });
+    );
 
     msg_writer.write_batch(removals);
 }
@@ -362,6 +399,7 @@ pub(crate) fn host_entity_removal_executor<T: HostIdType + 'static> (
                         entity: msg.entity,
                         host_id: Some(hostid),
                         comments: None,
+                        request_key: msg.request_key,
                     })
                 })
             }
@@ -380,7 +418,10 @@ pub(crate) fn forward_despawn_success_signals(
     let transformed_msgs = success_messages
         .read()
         .map(|msg| {
-            let out_msg = cranium_ffi::ApiOutMsg::EntityDespawnSuccessful(msg.host_id.clone().into());
+            let out_msg = cranium_ffi::StagedApiOutMsg::EntityDespawnSuccessful(
+                msg.host_id.clone().into(),
+                msg.request_key
+            );
             bevy::log::debug!("Queuing up a EntityDespawnSuccessful Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
         }
@@ -397,7 +438,11 @@ pub(crate) fn forward_despawn_error_signals(
     let transformed_msgs = success_messages
         .read()
         .map(|msg| {
-            let out_msg = cranium_ffi::ApiOutMsg::EntityDespawnError(msg.host_id.clone().into());
+            let out_msg = cranium_ffi::StagedApiOutMsg::EntityDespawnError(
+                msg.host_id.clone().into(),
+                msg.request_key, 
+                msg.error.clone(), 
+            );
             bevy::log::debug!("Queuing up a EntitySpawnError Message for output channel send: {:?}", out_msg);
             QueuedApiOutMessage(out_msg)
         }

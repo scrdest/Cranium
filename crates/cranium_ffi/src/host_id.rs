@@ -52,7 +52,9 @@ impl TrivialHostIdType for usize {}
 #[repr(C)]
 pub enum NativeHostIdType {
     U64(u64),
-    Usize(usize),
+    U32(u32),
+    I64(i64),
+    I32(i32),
 }
 
 impl NativeHostIdType {
@@ -70,27 +72,27 @@ impl NativeHostIdType {
         }
     }
 
-    fn try_as_usize(self) -> Option<usize> {
+    fn try_as_u32(self) -> Option<u32> {
         match self {
-            Self::Usize(v) => Some(v),
+            Self::U32(v) => Some(v),
+            _ => None
+        }
+    }
+
+    fn try_as_i64(self) -> Option<i64> {
+        match self {
+            Self::I64(v) => Some(v),
+            _ => None
+        }
+    }
+
+    fn try_as_i32(self) -> Option<i32> {
+        match self {
+            Self::I32(v) => Some(v),
             _ => None
         }
     }
 }
-
-// impl From<String> for NativeHostIdType {
-//     fn from(value: String) -> Self {
-//         Self::String(value)
-//     }
-// }
-
-// impl TryInto<String> for NativeHostIdType {
-//     type Error = ();
-
-//     fn try_into(self) -> Result<String, Self::Error> {
-//         self.try_as_string().ok_or(())
-//     }
-// }
 
 impl From<u64> for NativeHostIdType {
     fn from(value: u64) -> Self {
@@ -106,19 +108,48 @@ impl TryInto<u64> for NativeHostIdType {
     }
 }
 
-impl From<usize> for NativeHostIdType {
-    fn from(value: usize) -> Self {
-        Self::Usize(value)
+impl From<u32> for NativeHostIdType {
+    fn from(value: u32) -> Self {
+        Self::U32(value)
     }
 }
 
-impl TryInto<usize> for NativeHostIdType {
+impl TryInto<u32> for NativeHostIdType {
     type Error = ();
 
-    fn try_into(self) -> Result<usize, Self::Error> {
-        self.try_as_usize().ok_or(())
+    fn try_into(self) -> Result<u32, Self::Error> {
+        self.try_as_u32().ok_or(())
     }
 }
+
+impl From<i64> for NativeHostIdType {
+    fn from(value: i64) -> Self {
+        Self::I64(value)
+    }
+}
+
+impl TryInto<i64> for NativeHostIdType {
+    type Error = ();
+
+    fn try_into(self) -> Result<i64, Self::Error> {
+        self.try_as_i64().ok_or(())
+    }
+}
+
+impl From<i32> for NativeHostIdType {
+    fn from(value: i32) -> Self {
+        Self::I32(value)
+    }
+}
+
+impl TryInto<i32> for NativeHostIdType {
+    type Error = ();
+
+    fn try_into(self) -> Result<i32, Self::Error> {
+        self.try_as_i32().ok_or(())
+    }
+}
+
 
 impl TrivialHostIdType for NativeHostIdType {}
 

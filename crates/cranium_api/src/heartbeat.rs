@@ -21,7 +21,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! by setting the `CRANIUM_AUTORUN_HEARTBEAT_TIMEOUT_SECONDS` envvar.
 //! 
 //! For long-running applications, numerical stability is ensured by using a wrap period for the heartbeat time, 
-//! which is also configurable, using `CORTEX_AUTORUN_PERIOD_SECONDS` - generally, this should be at least an order 
+//! which is also configurable, using `CRANIUM_AUTORUN_PERIOD_SECONDS` - generally, this should be at least an order 
 //! of magnitude or two higher than the timeout time or you may observe false negatives.
 
 use core::{num::NonZero, sync::atomic, time::Duration};
@@ -142,7 +142,7 @@ impl Plugin for AutoRunHeartbeatPlugin {
         .unwrap_or(60*2) // 2 mins by default
         ; 
 
-        let period_seconds = option_env!("CORTEX_AUTORUN_PERIOD_SECONDS")
+        let period_seconds = option_env!("CRANIUM_AUTORUN_PERIOD_SECONDS")
             .map(|s| s.trim().parse::<u64>().ok()).flatten()
             .unwrap_or(60*60*6) // 6 hours by default
         ; 

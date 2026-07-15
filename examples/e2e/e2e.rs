@@ -68,17 +68,17 @@ fn example_action(
         .unwrap_or("<none>".to_string())
     ;
 
-    let context_data = match context_data_qry.get(event.ctx) {
-        Ok(data) => data,
-        Err(err) => {
+    let context_data = context_data_qry
+        .get(event.ctx)
+        .map_err(|err| {
             bevy::log::error!(
                 "example_action for AI {:?} - Received an invalid Context {:?} ({:?})!", 
                 ai_owner, event.ctx, err,
             );
-            panic!("Invalid context!");
-            // return;
-        }
-    };
+            err
+        })
+        .expect("Invalid context")
+    ;
 
     let state_mapping = &context_data.statemap;
 

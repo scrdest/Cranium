@@ -14,12 +14,12 @@ use cranium_core::actions::ActionKey;
 use cranium_core::events::{AiActionPicked, AiDecisionRequested, NoDecisionMessage};
 use cranium_core::smart_object::SmartObjects;
 use crossbeam_channel;
-use cranium_ffi::{ApiInMsg, ApiOutMsg, EntityOperation, FFIIngestedString, HostIdType, HostMapped, NativeHostIdType, ffi_raw_string_from_str};
+use cranium_ffi::{ApiInMsg, EntityOperation, HostIdType, HostMapped, NativeHostIdType, RequestKey, StagedApiOutMsg};
 
 use crate::spawn;
 
-pub(crate) const DEFAULT_IN_CHANNEL_BOUND: usize = 10_000;
-pub(crate) const DEFAULT_OUT_CHANNEL_BOUND: usize = 10_000;
+pub(crate) const DEFAULT_IN_CHANNEL_BOUND: usize = 100;
+pub(crate) const DEFAULT_OUT_CHANNEL_BOUND: usize = 100;
 pub(crate) const MAX_FULL_TICKS_FOR_MAINTENANCE: usize = 10;
 
 
@@ -36,7 +36,7 @@ pub(crate) static IN_CHANNEL: OnceLock<crossbeam_channel::Sender<ApiInMsg>> = On
 /// If Cranium is our 'brain', this would be our 'efferent nerves'.
 /// 
 /// This is used to exfiltrate data such as chosen Actions out of the AI engine and into the host.
-pub(crate) static OUT_CHANNEL: OnceLock<crossbeam_channel::Receiver<ApiOutMsg>> = OnceLock::new();
+pub(crate) static OUT_CHANNEL: OnceLock<crossbeam_channel::Receiver<StagedApiOutMsg>> = OnceLock::new();
 
 
 /// A Resource that represents Read access to the Input channel, 
@@ -51,7 +51,7 @@ pub struct ApiInputChannel {
 /// i.e. messages sent BY Cranium TO the host application.
 #[derive(Resource)]
 pub struct ApiOutputChannel {
-    pub sender: crossbeam_channel::Sender<ApiOutMsg>
+    pub sender: crossbeam_channel::Sender<StagedApiOutMsg>
 }
 
 
@@ -74,13 +74,14 @@ pub(crate) struct ApiInputChannelMock {
 /// Intended for 'plunger' Systems that deal with clogged Output pipes.
 #[derive(Resource)]
 pub(crate) struct ApiOutputChannelMaintenance {
-    pub(crate) receiver: crossbeam_channel::Receiver<ApiOutMsg>
+    pub(crate) receiver: crossbeam_channel::Receiver<StagedApiOutMsg>,
+    pub(crate) pop_messages: bool, 
 }
 
 #[derive(Message)]
 pub(crate) struct DecisionRequestedMsg<I: HostIdType> {
     /// An identifier of the request so we can tie the response back to it neatly.
-    request_key: String,
+    request_key: RequestKey,
 
     /// The AI-driven entity we are requesting an update from.
     target: I,
@@ -90,7 +91,7 @@ pub(crate) struct DecisionRequestedMsg<I: HostIdType> {
 /// This is effectively a local buffer of ApiOutMsgs we are about to emit.
 /// Similar idea as Commands, but does not touch the World - just the ApiOutputChannel Resource.
 #[derive(Message, Debug)]
-pub(crate) struct QueuedApiOutMessage(pub(crate) ApiOutMsg);
+pub(crate) struct QueuedApiOutMessage(pub(crate) StagedApiOutMsg);
 
 
 /// A System that handles receiving and applying updates from the user application to the Cranium app.
@@ -106,7 +107,7 @@ pub(crate) fn process_input_messages(
         bevy::log::debug!("Received input message {:?} - {:?}", i, msg);
         match msg {
             ApiInMsg::Ping => {
-                message_queue.write(QueuedApiOutMessage(ApiOutMsg::Pong));
+                message_queue.write(QueuedApiOutMessage(StagedApiOutMsg::Pong));
                 bevy::log::debug!("Queued up a Pong response");
             },
 
@@ -120,13 +121,25 @@ pub(crate) fn process_input_messages(
                 ops.iter().for_each(
                     |raw_op| {
                         match raw_op {
-                            EntityOperation::RemoveEntity { host_id } => {
-                                removal_rq_writer.write(HostEntityRequestRemovalMessage { target_host_id: host_id.clone() });
+                            EntityOperation::RemoveEntity { 
+                                host_id ,
+                                request_key
+                            } => {
+                                removal_rq_writer.write(
+                                    HostEntityRequestRemovalMessage { 
+                                        target_host_id: host_id.clone(),
+                                        request_key: request_key.clone(),
+                                    });
                             },
-                            EntityOperation::UpsertEntity { host_id, components } => {
+                            EntityOperation::UpsertEntity { 
+                                host_id, 
+                                components , 
+                                request_key, 
+                            } => {
                                 upsert_rq_writer.write(spawn::HostSpawnRequestMsg { 
                                     host_id: host_id.clone(), 
-                                    payload: components.clone() 
+                                    payload: components.clone(), 
+                                    request_key: request_key.clone(),
                                 });
                             }
                         }
@@ -153,7 +166,13 @@ pub(crate) fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
     mut message_queue: MessageReader<QueuedApiOutMessage>, 
 ) {
     for (queued_msg, msg_id) in message_queue.read_with_id() {
-        let result = out_channel.sender.send_timeout(queued_msg.0.clone(), Duration::from_secs(TIMEOUT_SECONDS));
+        let output_message = queued_msg.0.clone().into();
+
+        let result = out_channel.sender.send_timeout(
+            output_message, 
+            Duration::from_secs(TIMEOUT_SECONDS)
+        );
+
         match result {
             Ok(_) => {
                 bevy::log::debug!("Sent a message (ID: {}) to the API output channel - {:?}", msg_id, queued_msg);
@@ -179,6 +198,7 @@ pub(crate) fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
 #[derive(Message)]
 pub(crate) struct HostEntityRequestRemovalMessage<T: HostIdType> {
     pub(crate) target_host_id: T,
+    pub request_key: RequestKey,
 }
 
 /// This represents that we have decided that a HostMapped Cranium Entity needs to go. 
@@ -189,7 +209,8 @@ pub(crate) struct HostEntityRequestRemovalMessage<T: HostIdType> {
 /// The core cleanup is guaranteed to only run at the end of the update schedule.
 #[derive(Message)]
 pub(crate) struct HostEntityRemovalTriggered {
-    pub(crate) entity: Entity
+    pub(crate) entity: Entity,
+    pub request_key: RequestKey,
 }
 
 #[derive(Default, Resource)]
@@ -273,11 +294,11 @@ pub struct HostActionIdMap<I: HostIdType + 'static> {
 }
 
 impl<I: HostIdType + 'static> HostActionIdMap<I> {
-    fn get_host_id(&self, key: &ActionKey) -> Option<&Arc<I>> {
+    pub fn get_host_id(&self, key: &ActionKey) -> Option<&Arc<I>> {
         self.key_to_host_id_map.get(key)
     }
 
-    fn get_action_key(&self, key: &I) -> Option<&Arc<ActionKey>> {
+    pub fn get_action_key(&self, key: &I) -> Option<&Arc<ActionKey>> {
         self.host_id_to_key_map.get(key)
     }
 
@@ -332,35 +353,66 @@ impl<I: HostIdType + 'static> HostActionIdMap<I> {
     }
 }
 
-pub(crate) fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
+pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
     trigger: On<AiActionPicked>,
     query: Query<&HostMapped<I>>,
     host_action_id_registry: Res<HostActionIdMap<I>>,
     mut message_queue: MessageWriter<QueuedApiOutMessage>,
 ) {
-    let host_mapped_agent_id = query.get(trigger.event_target()).and_then(|comp| {
+    let tgt = trigger.event_target();
+    let host_mapped_agent_id = query.get(tgt).and_then(|comp| {
         Ok(comp.host_id.clone())
-    }).unwrap();
+    }).map_err(|err| {
+        bevy::log::error!(
+            "decision_output_handler - failed to locate a HostMapped component on the AiActionPicked Target {:?}.
+            Error: '{}'.  
+            ActionChosen message will not be send due to invariant violation. ",
+            tgt,
+            err, 
+        )
+    });
 
     let host_mapped_context = query.get(trigger.action_context).and_then(|comp| {
         Ok(comp.host_id.clone())
-    }).unwrap();
+    }).map_err(|err| {
+        bevy::log::error!(
+            "decision_output_handler - failed to locate a HostMapped component on the AiActionPicked Context {:?}. 
+            Error: '{}'. 
+            ActionChosen message will not be send due to invariant violation. ",
+            trigger.action_context,
+            err, 
+        )
+    });
 
-    let host_mapped_action = host_action_id_registry.get_host_id(&trigger.action_key).unwrap();
+    let host_mapped_action = host_action_id_registry.get_host_id(&trigger.action_key).or_else(|| {
+        bevy::log::error!(
+            "decision_output_handler - failed to match a HostId for an AiActionPicked Action {:?}. 
+            ActionChosen message will not be send due to invariant violation. ",
+            &trigger.action_key,
+        );
+        None
+    });
 
-    // let translated_rq_key = trigger.request_key.map(|k| ffi_raw_string_from_str(&k));
-
-    message_queue.write(QueuedApiOutMessage(ApiOutMsg::ActionChosen { 
-        host_agent_id: host_mapped_agent_id.into(), 
-        host_action_id: host_mapped_action.as_ref().to_owned().into(), 
-        host_context_id: host_mapped_context.into(), 
-        // request_key: translated_rq_key,
-    }))
+    match (host_mapped_agent_id, host_mapped_context, host_mapped_action) {
+        (Ok(agent_id), Ok(context), Some(action)) => {
+            message_queue.write(
+                QueuedApiOutMessage(
+                    StagedApiOutMsg::ActionChosen { 
+                        host_agent_id: agent_id.into(), 
+                        host_action_id: action.as_ref().to_owned().into(), 
+                        host_context_id: context.into(), 
+                        request_key: trigger.request_key.unwrap_or_default(),
+                    }
+                )
+            );
+        }
+        _ => ()
+    }
     ;
 }
 
 
-pub(crate) fn decision_failed_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
+pub fn decision_failed_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
     query: Query<&HostMapped<I>>,
     mut input_msgs: MessageReader<NoDecisionMessage>,
     mut message_queue: MessageWriter<QueuedApiOutMessage>,
@@ -373,12 +425,12 @@ pub(crate) fn decision_failed_handler<I: HostIdType + 'static + Into<NativeHostI
             }
         ).unwrap();
 
-        // let translated_rq_key = trigger.request_key.map(|k| ffi_raw_string_from_str(&k));
-
-        QueuedApiOutMessage(ApiOutMsg::NoActionChosen { 
-            host_agent_id: host_mapped_agent_id.into(), 
-            // request_key: translated_rq_key,
-        })
+        QueuedApiOutMessage(
+            StagedApiOutMsg::NoActionChosen { 
+                host_agent_id: host_mapped_agent_id.into(), 
+                request_key: msg.request_key.unwrap_or_default()
+            },
+        )
     })
     ;
 
@@ -387,18 +439,29 @@ pub(crate) fn decision_failed_handler<I: HostIdType + 'static + Into<NativeHostI
 
 
 /// A maintenance system that tries to save clogged output channels by popping oldest messages off of it. 
-pub(crate) fn check_output_channel_for_clogs(
+pub fn check_output_channel_for_clogs(
     out_channel: ResMut<ApiOutputChannelMaintenance>,
     mut channel_full_ticks: Local<usize>,
 ) {
     let is_full = out_channel.receiver.capacity().unwrap_or_default() > 0 && out_channel.receiver.is_full();
-    if is_full {
-        *channel_full_ticks = channel_full_ticks.saturating_add(1);
+    match is_full {
+        true => *channel_full_ticks = channel_full_ticks.saturating_add(1),
+        false => *channel_full_ticks = 0,
     }
 
     if *channel_full_ticks > MAX_FULL_TICKS_FOR_MAINTENANCE {
-        // Pop a message from the channel to hopefully unclog it.
-        bevy::log::debug!("Cranium output channel clogged! Attempting a receive...");
-        let _ = out_channel.receiver.recv();
+        match out_channel.pop_messages {
+            true => {
+                // Pop a message from the channel to hopefully unclog it.
+                bevy::log::warn!("Cranium output channel clogged! Attempting a receive...");
+                let _ = out_channel.receiver.recv();
+            },
+            false => {
+                // Just alert that we're full up.
+                bevy::log::warn!(
+                    "Cranium output channel clogged! Messages will not be produced until some have been received!"
+                );
+            }
+        }
     }
 }

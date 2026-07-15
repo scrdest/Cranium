@@ -28,11 +28,11 @@ impl<F: Send + Sync + Fn(&String) -> crate::curves::SupportedUtilityCurve> Curve
 #[derive(Default, Clone)]
 pub enum NoCurveMatchStrategy {
     #[default]
-    Panic,
-    SkipConsiderationWithLog,
     SkipActionWithLog,
+    SkipConsiderationWithLog,
     DefaultCurveWithLog(Arc<dyn CurveResolverFn>),
     DefaultCurveWithoutLog(Arc<dyn CurveResolverFn>),
+    Panic,
 }
 
 impl NoCurveMatchStrategy {

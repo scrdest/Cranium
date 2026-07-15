@@ -35,7 +35,7 @@ use std::{time::Duration};
 
 // We'll reuse the types from the Rust library to avoid redeclaring; the example already needed to build 
 // cranium_api because of how Cargo examples work, but in a real example we don't quite need this.
-use cranium_ffi::{ApiInMsg, ApiOutMsg, FFIOption};
+use cranium_ffi::{ApiOutMsg, FFIOption, RequestKey};
 
 
 // Bindings to the relevant functions in the DLL.
@@ -46,16 +46,18 @@ use cranium_ffi::{ApiInMsg, ApiOutMsg, FFIOption};
 #[cfg_attr(target_os = "macos", link(name = "target/debug/deps/cranium_api.dylib", kind = "dylib"))]
 unsafe extern "C" {
     safe fn cranium_create_and_autorun();
+    safe fn cranium_shutdown();
     safe fn cranium_keepalive();
     safe fn cranium_await_message() -> FFIOption<ApiOutMsg>;
-    safe fn cranium_try_get_message_with_timeout() -> FFIOption<ApiOutMsg>;
+    safe fn cranium_try_get_message_with_default_timeout() -> FFIOption<ApiOutMsg>;
+    safe fn cranium_try_get_message_with_timeout(timeout_milliseconds: u32) -> FFIOption<ApiOutMsg>;
     safe fn cranium_write_ping() -> bool;
-    safe fn cranium_request_spawn_u64(host_id: u64, components: *const core::ffi::c_char);
-    safe fn cranium_request_spawn_usize(host_id: usize, components: *const core::ffi::c_char);
-    safe fn cranium_request_despawn_u64(host_id: u64);
-    safe fn cranium_request_despawn_usize(host_id: usize);
-    safe fn cranium_request_decision_u64(host_id: u64, request_key: *const core::ffi::c_char);
-    safe fn cranium_request_decision_usize(host_id: usize, request_key: *const core::ffi::c_char);
+    safe fn cranium_request_spawn_u64(host_id: u64, components: *const core::ffi::c_char, request_key: RequestKey);
+    safe fn cranium_request_spawn_u32(host_id: u32, components: *const core::ffi::c_char, request_key: RequestKey);
+    safe fn cranium_request_despawn_u64(host_id: u64, request_key: RequestKey);
+    safe fn cranium_request_despawn_u32(host_id: u32, request_key: RequestKey);
+    safe fn cranium_request_decision_u64(host_id: u64, request_key: RequestKey);
+    safe fn cranium_request_decision_u32(host_id: u32, request_key: RequestKey);
 }
 
 /// A trivial Rusty wrapper for the extern function to make thread::spawn happy.
@@ -96,86 +98,103 @@ fn main() {
             println!("Sent a ping");
         }
 
-        let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+        let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
         if let Some(msg) = maybe_msg {
-            println!("Received a message: {:?}", msg);
+            println!("Received a message: {}", msg);
         }
 
         ctr += 1;
 
         if ctr == 1 {
-            println!("Sending a spawn ID=5 (u64) request...");
+            println!("Sending a valid spawn RequestKey=1 ID=5 (u64) request...");
 
-            let payload = cranium_ffi::ffi_raw_string_from_str(
-                "{
-                    \"CraniumTestComponent\": {\"val\": 55},
-                    \"AIController\": {}
-                }\0"
-            );
+            let payload = unsafe { 
+                // NOTE: This is only Unsafe because we have to ensure the nul-terminator is here.
+                cranium_ffi::ffi_raw_string_from_str_unchecked(
+                    "{
+                        \"CraniumTestComponent\": {\"val\": 55},
+                        \"AIController\": {}
+                    }\0"
+                ) 
+            };
 
-            cranium_request_spawn_u64(5, payload);
+            cranium_request_spawn_u64(5, payload, 1);
             
-            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
             if let Some(msg) = maybe_msg {
-                println!("Received a message: {:?}", msg);
+                println!("Received a message: {}", msg);
             }
         }
 
         if ctr == 2 {
-            println!("Sending a spawn ID=6 (usize) request...");
+            // Uses an unregistered Component - expected failure. 
+            // The point is to illustrate how you'll get errors back from Cranium. 
+            println!("Sending an invalid spawn RequestKey=2 ID=6 (u32) request...");
             
-            let payload = cranium_ffi::ffi_raw_string_from_str(
-                "{
-                    \"CraniumTestComponent\": {\"val\": 66},
-                    \"AIController\": {}
-                }\0"
-            );
+            let payload = unsafe { 
+                // NOTE: This is only Unsafe because we have to ensure the nul-terminator is here.
+                cranium_ffi::ffi_raw_string_from_str_unchecked(
+                    "{
+                        \"MadeUpComponent\": {\"val\": 66},
+                        \"AIController\": {}
+                    }\0"
+                ) 
+            };
 
-            cranium_request_spawn_usize(6, payload);
+            cranium_request_spawn_u32(6, payload, 2);
             
-            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
             if let Some(msg) = maybe_msg {
-                println!("Received a message: {:?}", msg);
-            }
-        }
-
-        if ctr == 4 {
-            println!("Sending a despawn ID=6 (usize) request...");
-
-            cranium_request_despawn_usize(6);
-            
-            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
-            if let Some(msg) = maybe_msg {
-                println!("Received a message: {:?}", msg);
+                println!("Received a message: {}", msg);
             }
         }
 
         if ctr == 3 {
-            println!("Sending a ID=5 (u64) AI Decision request...");
-            let request_key = cranium_ffi::ffi_raw_string_from_str("test_rq\0");
+            // Because the previous request (key=2) failed, this will fail too.
+            // The point is to illustrate how you'll get errors back from Cranium. 
+            println!("Sending an invalid despawn, RequestKey=3 ID=6 (u32) request...");
+
+            cranium_request_despawn_u32(6, 3);
+            
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+            if let Some(msg) = maybe_msg {
+                println!("Received a message: {}", msg);
+            }
+        }
+
+        if ctr == 4 {
+            println!("Sending a RequestKey=4 ID=5 (u64), AI Decision request...");
+            let request_key = 4;
 
             cranium_request_decision_u64(5, request_key);
             
-            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
             if let Some(msg) = maybe_msg {
-                println!("Received a message: {:?}", msg);
+                println!("Received a message: {}", msg);
             }
         }
 
         if ctr == 5 {
-            println!("Sending a despawn ID=5 (u64) request...");
+            println!("Sending a despawn, RequestKey=555 ID=5 (u64) request...");
 
-            cranium_request_despawn_u64(5);
+            cranium_request_despawn_u64(5, 555);
             
-            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_timeout().into();
+            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
             if let Some(msg) = maybe_msg {
-                println!("Received a message: {:?}", msg);
+                println!("Received a message: {}", msg);
             }
         }
 
         if ctr == 12 || ctr == 24 {
             println!("Sending a keep-alive heartbeat...");
             cranium_keepalive();
+        }
+
+        if ctr == 64 {
+            // We should not reach this normally, as the timeout should kill the app.
+            // For illustration though, this is how you tear down the server via FFI.
+            println!("Shutting down Cranium...");
+            cranium_shutdown();
         }
     }
 }

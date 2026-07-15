@@ -3,11 +3,14 @@ This Source Code Form is subject to the terms of the Mozilla Public License, v. 
 If a copy of the MPL was not distributed with this file, 
 You can obtain one at https://mozilla.org/MPL/2.0/. 
 */
+use core::{ffi::CStr, fmt::Display, str::Utf8Error};
 
 use crate::{host_id::NativeHostIdType};
 
 // We need this import or Cargo complains about panic unwinding vOv
 use bevy::prelude::*;
+
+pub type RequestKey = cranium_core::types::RequestKey;
 
 /// Alias for the standard Cranium representation of string data across FFI boundaries. 
 /// This is the thing Cranium's DLL/SO interfaces consume directly.
@@ -21,27 +24,52 @@ pub type FFIIngestedString = String;
 
 /// Turns a normal Rust &str into Cranium's FFI-friendly representation.
 /// 
-/// IMPORTANT: The input string should contain EXACTLY one nul 
+/// IMPORTANT: The input string should contain at least one nul 
 /// (i.e. '\0', unquoted) at the end to fit the expected format.
+/// 
+/// Because of this restriction, the function is unsafe - failing to 
+/// ensure the input is nul-terminated will result in a panic!
+///  
+/// Primarily intended as a convenience for testing FFI calls from Rust 
+/// because it's a pretty gnarly piece of boilerplate in those scenarios. 
+pub unsafe fn ffi_raw_string_from_str_unchecked(inp: &str) -> FFIRawString {
+    core::ffi::CStr::from_bytes_until_nul(
+        inp.as_bytes()
+    )
+    .map_err(|err| {
+        bevy::log::error!("Error converting Rust string {} to FFI string - {}", inp, err)
+    })
+    .map(|s| s.as_ptr())
+    .unwrap()
+}
+
+/// Turns a normal Rust &str into Cranium's FFI-friendly representation.
 ///  
 /// Primarily intended as a convenience for testing FFI calls from Rust 
 /// because it's a pretty gnarly piece of boilerplate in those scenarios. 
 pub fn ffi_raw_string_from_str(inp: &str) -> FFIRawString {
-    core::ffi::CStr::from_bytes_with_nul(
-        inp.as_bytes()
-    )
-    .unwrap()
-    .as_ptr()
+    let padded_inp = format!("{}\0", inp);
+    unsafe { 
+        // SAFETY: we've manually added a terminator above, 
+        // so there will always be at least one. 
+        ffi_raw_string_from_str_unchecked(&padded_inp) 
+    }
 }
 
 /// Turns the FFIRawString into something slightly more Rust-palatable. 
 /// 
 /// This is intended purely for internal use for abstraction and boilerplate reduction.
 pub unsafe fn ingest_string_from_ffi_raw_string<'a>(inp: FFIRawString) -> FFIIngestedString {
+    unsafe { try_ingest_string_from_ffi_raw_string(inp) }.unwrap()
+}
+
+/// Fallibly turns the FFIRawString into something slightly more Rust-palatable. 
+/// 
+/// This is intended purely for internal use for abstraction and boilerplate reduction.
+pub unsafe fn try_ingest_string_from_ffi_raw_string<'a>(inp: FFIRawString) -> Result<FFIIngestedString, Utf8Error> {
     // We copy this over to an owned String ASAP to make sure nobody can mess up the data 
     // the pointer is pointer-ing to; after that point, we have ensured a nice safe value.
-    unsafe { core::ffi::CStr::from_ptr(inp) }.to_str().unwrap().to_string()
-}
+    unsafe { core::ffi::CStr::from_ptr(inp) }.to_str().map(|s| s.to_string()) }
 
 
 /// A tiny reimplementation of Option<T> with a guaranteed repr(C) 
@@ -78,11 +106,11 @@ impl<T: core::fmt::Debug> core::fmt::Debug for FFIOption<T> {
     }
 }
 
-impl<T> Into<FFIOption<T>> for Option<T> {
-    fn into(self) -> FFIOption<T> {
-        match self {
-            Self::None => FFIOption::None,
-            Self::Some(v) => FFIOption::Some(v)
+impl<T> From<Option<T>> for FFIOption<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            None => FFIOption::None,
+            Some(v) => FFIOption::Some(v)
         }
     }
 }
@@ -103,17 +131,18 @@ impl<T> Into<Option<T>> for FFIOption<T> {
 pub enum EntityOperation {
     UpsertEntity {
         host_id: NativeHostIdType,
-        components: String
+        components: String, 
+        request_key: RequestKey,
     },
 
     RemoveEntity {
-        host_id: NativeHostIdType
+        host_id: NativeHostIdType, 
+        request_key: RequestKey,
     }
 }
 
 
-/// A repr(C) enum of all possible messages Cranium can receive from the outside world.
-#[repr(C)]
+/// An enum of all possible messages Cranium can receive from the outside world.
 #[derive(Debug)]
 pub enum ApiInMsg {
     /// A request to terminate the server.
@@ -129,13 +158,14 @@ pub enum ApiInMsg {
 
     /// Triggers Cranium to run AI decision processing for specified target Entities (by Host ID).
     RequestDecision {
-        targets: Vec<(String, NativeHostIdType)>,
+        targets: Vec<(RequestKey, NativeHostIdType)>,
     },
-
 }
 
-
 /// A repr(C) enum of all possible things Cranium will message about externally. 
+/// 
+/// This is NOT what the actual Channels carry in Rust, 
+/// but it IS what Cranium outputs to users.
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub enum ApiOutMsg {
@@ -153,19 +183,127 @@ pub enum ApiOutMsg {
         host_agent_id: NativeHostIdType, 
         host_action_id: NativeHostIdType, // TODO: review
         host_context_id: NativeHostIdType, // TODO: review
+        request_key: RequestKey,
     },
 
     /// Feedback message sent if ActionChosen is infeasible for any reason 
     /// (e.g. the entity does not exist, is not AI-enabled, or has nothing to do)
     NoActionChosen {
         host_agent_id: NativeHostIdType, 
+        request_key: RequestKey,
     },
 
     // Feedback for Spawn ops
-    EntitySpawnSuccessful(NativeHostIdType),
-    EntitySpawnError(NativeHostIdType), // TODO: add a way to emit error messages
+    EntitySpawnSuccessful(NativeHostIdType, RequestKey),
+    EntitySpawnError(NativeHostIdType, RequestKey, FFIRawString), 
 
     // Feedback for Despawn ops
-    EntityDespawnSuccessful(FFIOption<NativeHostIdType>),
-    EntityDespawnError(FFIOption<NativeHostIdType>), // TODO: add a way to emit error messages
+    EntityDespawnSuccessful(FFIOption<NativeHostIdType>, RequestKey),
+    EntityDespawnError(FFIOption<NativeHostIdType>, RequestKey, FFIRawString),
+}
+
+impl Display for ApiOutMsg {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EntitySpawnError(id, rqkey, err) => {
+                f.write_str(&format!(
+                    "EntitySpawnError(HostId: {:?}, RequestKey: {:?}, Error: '{}')",
+                    id, rqkey, unsafe { CStr::from_ptr(*err) }.to_string_lossy()
+                ))
+            },
+            Self::EntityDespawnError(id, rqkey, err) => {
+                f.write_str(&format!(
+                    "EntityDespawnError(HostId: {:?}, RequestKey: {:?}, Error: '{}')",
+                    id, rqkey, unsafe { CStr::from_ptr(*err) }.to_string_lossy()
+                ))
+            },
+            _ => f.write_str(&format!("{:?}", self)),
+        }
+    }
+}
+
+
+
+/// This is an 'unbaked' ApiOutMsg that can be used in Messages, but requires FFI-zation. 
+/// Critically, this type is NOT repr(C) and is not trying to be. 
+/// Types may be mapped into C-friendly types when converting this to an ApiOutMsg.
+#[derive(Debug, Clone)]
+pub enum StagedApiOutMsg {
+    /// Server confirms it has gone online.
+    CraniumStarted,
+
+    /// Server warns that it is about to shut down. 
+    CraniumTerminating,
+
+    /// Response to a Ping request - confirms it's live and responsive.
+    Pong,
+
+    /// The core output of Cranium - selected an Action for some AI Agent. 
+    ActionChosen {
+        host_agent_id: NativeHostIdType, 
+        host_action_id: NativeHostIdType, // TODO: review
+        host_context_id: NativeHostIdType, // TODO: review
+        request_key: RequestKey,
+    },
+
+    /// Feedback message sent if ActionChosen is infeasible for any reason 
+    /// (e.g. the entity does not exist, is not AI-enabled, or has nothing to do)
+    NoActionChosen {
+        host_agent_id: NativeHostIdType, 
+        request_key: RequestKey,
+    },
+
+    // Feedback for Spawn ops
+    EntitySpawnSuccessful(NativeHostIdType, RequestKey),
+    EntitySpawnError(NativeHostIdType, RequestKey, String), 
+
+    // Feedback for Despawn ops
+    EntityDespawnSuccessful(FFIOption<NativeHostIdType>, RequestKey),
+    EntityDespawnError(FFIOption<NativeHostIdType>, RequestKey, String), 
+}
+
+impl Into<ApiOutMsg> for StagedApiOutMsg {
+    fn into(self) -> ApiOutMsg {
+        match self {
+            Self::CraniumStarted => ApiOutMsg::CraniumStarted,
+            Self::CraniumTerminating => ApiOutMsg::CraniumTerminating,
+            Self::Pong => ApiOutMsg::Pong,
+            Self::ActionChosen { 
+                host_agent_id, 
+                host_action_id, 
+                host_context_id, 
+                request_key 
+            } => {
+                ApiOutMsg::ActionChosen { 
+                    host_agent_id, 
+                    host_action_id, 
+                    host_context_id, 
+                    request_key: request_key
+                }
+            },
+            Self::NoActionChosen { host_agent_id, request_key } => {
+                ApiOutMsg::NoActionChosen { host_agent_id, request_key: request_key }
+            },
+            Self::EntitySpawnSuccessful(id, request_key) => {
+                ApiOutMsg::EntitySpawnSuccessful(id, request_key)
+            },
+            Self::EntitySpawnError(id, request_key, errmsg) => {
+                ApiOutMsg::EntitySpawnError(
+                    id, 
+                    request_key, 
+                    ffi_raw_string_from_str(&errmsg)
+                )
+            },
+            Self::EntityDespawnSuccessful(id, request_key) => {
+                ApiOutMsg::EntityDespawnSuccessful(id, request_key)
+            },
+            Self::EntityDespawnError(id, request_key, errmsg) => {
+                ApiOutMsg::EntityDespawnError(
+                    id, 
+                    request_key, 
+                    ffi_raw_string_from_str(&errmsg)
+                )
+            },
+        }
+    }
 }

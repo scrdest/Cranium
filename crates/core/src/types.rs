@@ -93,3 +93,5 @@ pub type ActionSetsRef = ThreadSafeRef<CraniumList<ActionSetRef>>;
 pub type EntityIdentifier = crate::entity_identifier::EntityIdentifier;
 
 pub type AiLodLevelPrimitive = u8;
+
+pub type RequestKey = u64;

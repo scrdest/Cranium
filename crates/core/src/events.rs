@@ -7,7 +7,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Assorted Event types used by Cranium.
 
 use bevy::prelude::*;
-use crate::{actions::ActionContext, types};
+use crate::{actions::ActionContext, types::{self, RequestKey}};
 
 /// An Event that signals the decision engine picked the new best Action
 /// for a specific AI Entity and provides details about it (abstract ID, 
@@ -40,7 +40,7 @@ pub struct AiActionPicked {
 
     /// Identifier of the request that has originally triggered this decision. 
     /// Used to tie the reponse back to the request that led to it.
-    pub request_key: Option<String>,
+    pub request_key: Option<RequestKey>,
 }
 
 impl AiActionPicked {
@@ -50,7 +50,7 @@ impl AiActionPicked {
         action_name: String,
         action_context: ActionContext,
         action_score: crate::types::ActionScore,
-        request_key: Option<String>,
+        request_key: Option<RequestKey>,
     ) -> Self {
         
         #[cfg(feature = "logging")]
@@ -89,7 +89,7 @@ pub struct SomeAiDecisionProcessed;
 #[derive(EntityEvent)]
 pub struct AiDecisionRequested {
     pub entity: types::AiEntity,
-    pub request_key: Option<String>,
+    pub request_key: Option<RequestKey>,
     pub smart_objects: Option<crate::types::SmartObjects>,
 }
 
@@ -102,7 +102,7 @@ pub struct AiDecisionRequested {
 #[derive(EntityEvent)]
 pub struct AiDecisionInitiated {
     pub entity: types::AiEntity,
-    pub request_key: Option<String>,
+    pub request_key: Option<RequestKey>,
     pub smart_objects: Option<crate::types::SmartObjects>,
 }
 
@@ -169,7 +169,7 @@ impl AiActionDispatchToUserCode {
 #[derive(Message)]
 pub struct NoDecisionMessage {
     pub entity: Entity,
-    pub request_key: Option<String>,
+    pub request_key: Option<RequestKey>,
     pub comment: Option<&'static str>,
 }
 

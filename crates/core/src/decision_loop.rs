@@ -175,7 +175,6 @@ pub fn decision_engine(
     utility_curve_registry: Option<Res<UtilityCurveRegistry>>,
     no_match_strategy_config: Option<Res<NoCurveMatchStrategyConfig>>,
     mut commands: Commands,
-    // mut failure_messages: MessageWriter<crate::events::NoDecisionMessage>,
 ) {
     bevy::log::debug!(
         "AiDecisionInitiated Event fired, running Decision Engine for Entity {} (Request: {:?})", 
@@ -195,11 +194,13 @@ pub fn decision_engine(
         // was malformed and was pointed at something that was not an AI in the first place.
         #[cfg(feature = "logging")]
         bevy::log::debug!("decision_engine: Decision request target {:?} is not an AI - ignoring the request.", audience);
-        // failure_messages.write(NoDecisionMessage {
-        //     entity: event.entity,
-        //     request_key: event.request_key.clone(),
-        //     comment: Some("Target is not an AI!"),
-        // });
+        commands.write_message(
+            NoDecisionMessage {
+                entity: event.entity,
+                request_key: event.request_key,
+                comment: Some("Target is not an AI!"),
+            }
+        );
         return;
     }
     
@@ -216,11 +217,13 @@ pub fn decision_engine(
         // fire in the first place, but weird things can sometimes happen in sufficiently big projects...
         #[cfg(feature = "logging")]
         bevy::log::debug!("decision_engine: AI {:?} disabled by LOD - ignoring decision request.", audience);
-        // failure_messages.write(NoDecisionMessage {
-        //     entity: event.entity,
-        //     request_key: event.request_key.clone(),
-        //     comment: Some("Target LOD is below the processing threshold."),
-        // });
+        commands.write_message(
+            NoDecisionMessage {
+                entity: event.entity,
+                request_key: event.request_key,
+                comment: Some("Target LOD is below the processing threshold."),
+            }
+        );
         return;
     }
     
@@ -244,11 +247,11 @@ pub fn decision_engine(
             // minimum, you'd have a SO with the key representing *the Controller itself*.
             #[cfg(feature = "logging")]
             bevy::log::debug!("decision_engine: AI {:?} - no SmartObjects available, idling", audience);
-            // failure_messages.write(NoDecisionMessage {
-            //     entity: event.entity,
-            //     request_key: event.request_key.clone(),
-            //     comment: Some("Target has no SmartObjects available."),
-            // });
+            commands.write_message(NoDecisionMessage {
+                entity: event.entity,
+                request_key: event.request_key.clone(),
+                comment: Some("Target has no SmartObjects available."),
+            });
             return;
         }
         Some(sos) => sos
@@ -273,8 +276,23 @@ pub fn decision_engine(
         audience, &smartobjects.actionset_refs
     );
 
+    // Flags to abandon a Decision Engine run entirely due to a serious error 
+    // (most likely, a poisoned lock).
+    //
+    // Instead of a boolean, it holds an optional 'reason' field, and if it is 
+    // populated, it is considered to be set (i.e. trigger an abort).
+    //
+    // Aborting means that the AI will NOT be making a decision at all.
+    // The system will emit a NoDecisionMessage as usual for such a scenario.
+    let mut abort_processing = None;
+
     // 2. Emit a request for Context for each ActionTemplate.
     for action_template in available_actions {
+        if abort_processing.is_some() {
+            // abort_processing functions as a flag to abandon this run entirely
+            break
+        }
+
         if !action_template.is_within_lod_range(&lod_level) {
             #[cfg(feature = "logging")]
             bevy::log::debug!(
@@ -297,7 +315,7 @@ pub fn decision_engine(
 
         let contexts = match cf_system {
             Some(system_guard) => {
-                let res = {
+                let entity_res = {
                     let res = system_guard.write().map(|mut cf_system| {
                         cf_system.run_readonly(
                             (
@@ -308,37 +326,44 @@ pub fn decision_engine(
                         )
                     });
 
-                    if res.is_err() {
-                        #[cfg(feature = "logging")]
-                        bevy::log::error!(
+                    if let Err(err) = res {
+                        let err_msg = format!(
                             "decision_engine: AI {:?} - ContextFetcher '{:?}' errored - lock poisoned ({:?})!", 
                             &audience, 
                             &action_template.context_fetcher_name, 
-                            &res,
+                            &err,
                         );
-                        // If we ever skipped the panic below, this should be uncommented
-                        // continue;
 
-                        // If the lock has been poisoned, we've had a panic inside it, 
-                        // so we're in uncharted waters - abort before things get worse.
-                        panic!("decision_engine: ContextFetcher failed - lock poisoned!");
-                    };
+                        #[cfg(feature = "logging")]
+                        bevy::log::error!(err_msg);
 
-                    res.unwrap()
+                        abort_processing = Some(err_msg);
+                        break;
+                    }
+
+                    // If we got here at all, we know this is safe to unwrap. 
+                    // The expect() is pro-forma - if we hit it, something got badly messed up in the code.
+                    res.expect("decision_engine: ContextFetcher lock guard errored out without aborting - this should not be possible!")
                 };
 
-                if res.is_err() {
+                if let Err(err) = entity_res {
+                    // If we got here, the error comes from a ContextFetcher.
+                    // That means it's bad (user needs to fix their code), but not fatal 
+                    // (other CFs can happily keep running; even this one may work for
+                    //  other inputs depending on the nature of the issue)
+
                     #[cfg(feature = "logging")]
                     bevy::log::error!(
                         "decision_engine: AI {:?} - ContextFetcher '{:?}' errored: {:?}", 
                         &audience, 
                         &action_template.context_fetcher_name, 
-                        &res,
+                        &err,
                     );
-                    continue;
-                };
 
-                res.expect("decision_engine: ContextFetcher result is Err - this should not be possible!")
+                    continue;
+                }
+
+                entity_res.expect("decision_engine: ContextFetcher result is Err - this should not be possible!")
             },
             None => {
                 #[cfg(feature = "logging")]
@@ -412,16 +437,17 @@ pub fn decision_engine(
 
                     match curve_miss_strategy {
                         None => {
-                            // This is a duplicate of the Panic strategy as indicated by the Default impl. 
+                            // This is a duplicate of the SkipActionWithLog strategy as indicated by the Default impl. 
                             // We COULD create a fallback value earlier, but that would cost us an extra 
                             // `.clone()` that we can kinda do without here just as well.
                             #[cfg(feature = "logging")]
-                            bevy::log::error!(
-                                "decision_engine: AI {:?} - Failed to resolve Curve key {:?} to a SupportedUtilityCurve, default behavior - panicking!", 
+                            bevy::log::warn!(
+                                "decision_engine: AI {:?} - failed to resolve Curve key {:?} to a SupportedUtilityCurve, skipping ActionTemplate {:?}!", 
                                 &audience,
-                                &cons.curve_name
+                                &cons.curve_name,
+                                &action_template.name,
                             );
-                            panic!("decision_engine: Failed to resolve Curve key to a SupportedUtilityCurve!");
+                            break;
                         },
 
                         Some(crate::errors::NoCurveMatchStrategy::Panic) => {
@@ -492,15 +518,13 @@ pub fn decision_engine(
                             &audience,
                             &cons.consideration_name
                         );
-                        // Uncomment if the panic! below is ever removed:
-                        // break;
-                        panic!("Consideration failed - could not resolve to a System!");
+                        break;
                     },
 
                     Some(system_guard) => {
                         let system_state = system_guard.write();
                         
-                        let res = {
+                        let run_res = {
                             let res = system_state
                                 .map(|mut consideration_system| {
                                     consideration_system.run_readonly(
@@ -513,31 +537,27 @@ pub fn decision_engine(
                                     )
                                 })
                             ;
-                            if res.is_err() {
-                                #[cfg(feature = "logging")]
-                                bevy::log::error!(
+
+                            if let Err(err) = res {
+                                let err_msg = format!(
                                     "AI {:?} - Consideration '{:}' errored - lock poisoned ({:?})!", 
                                     &audience, 
                                     &cons.consideration_name, 
-                                    &res
+                                    err,
                                 );
-                                // Uncomment if the expect-unwrap below is ever removed:
-                                // break;
+
+                                #[cfg(feature = "logging")]
+                                bevy::log::error!(err_msg);
+                                
+                                abort_processing = Some(err_msg);
+                                break;
                             };
 
                             // Only really needed if we don't break on poisoned locks.
                             res.expect("Consideration failed - lock poisoned!")
                         };
 
-                        // NOTE: As long as we panic on the lock poisoning, this is unreachable, 
-                        //       but I have a hunch someone will remove the panic and not handle 
-                        //       the error someday if we didn't account for this right now.
-                        if res.is_err() {
-                            curr_score = types::MIN_CONSIDERATION_SCORE - 1.;
-                            break;
-                        };
-
-                        let raw_score = match res {
+                        let raw_score = match run_res {
                             Err(_err) => {
                                 #[cfg(feature = "logging")]
                                 bevy::log::error!(
@@ -566,7 +586,8 @@ pub fn decision_engine(
                                         &cons.consideration_name, 
                                     );
                                     curr_score = types::MIN_CONSIDERATION_SCORE;
-                                    skip_this_context = true; break;
+                                    skip_this_context = true; 
+                                    break;
                                 }
                             }
                         };
@@ -715,6 +736,15 @@ pub fn decision_engine(
             }
         }
     }
+
+    if let Some(_abort_reason) = abort_processing {
+        commands.write_message(NoDecisionMessage {
+            entity: event.entity,
+            request_key: event.request_key.clone(),
+            comment: Some("Decision Engine run aborted due to a serious error!"),
+        });
+        return;
+    }
     
     match best_scoring_triple {
         None => {
@@ -723,11 +753,11 @@ pub fn decision_engine(
                 "decision_engine: AI {:?} - no suitable Actions found.",
                 &audience,
             );
-            // failure_messages.write(NoDecisionMessage {
-            //     entity: event.entity,
-            //     request_key: event.request_key.clone(),
-            //     comment: Some("No suitable Actions found!"),
-            // });
+            commands.write_message(NoDecisionMessage {
+                entity: event.entity,
+                request_key: event.request_key.clone(),
+                comment: Some("No suitable Actions found!"),
+            });
         }
         Some(best_tuple) => {
             let (
@@ -750,7 +780,7 @@ pub fn decision_engine(
                 action_name: best_template.name.to_owned(),
                 action_context: best_context.to_owned(),
                 action_score: best_score,
-                request_key: event.request_key.clone()
+                request_key: event.request_key
             };
 
             commands.trigger(pick_evt);
