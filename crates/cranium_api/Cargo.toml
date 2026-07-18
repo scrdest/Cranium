@@ -12,8 +12,8 @@ repository = "https://github.com/scrdest/Cranium"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-bevy_ecs = { version = ">=0.17.0, <0.19.0", default-features = false}
-bevy_reflect = { version = ">=0.17.0, <0.19.0", default-features = false}
+bevy_ecs = { version = ">=0.19.0, <0.20.0", default-features = false}
+bevy_reflect = { version = ">=0.19.0, <0.20.0", default-features = false}
 cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "../bevy_plugin", optional = false}
 cranium-core = {version = ">=0.1, <=0.3", path = "../core", features = ["bevy_remote"]}
 cranium-ffi = {version = "0.3", path = "../cranium_ffi"}

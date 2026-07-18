@@ -42,7 +42,8 @@ for NPCs in a project written in a deeply locked-down, decades-old game engine.
 
 | Bevy |              Cranium                | 
 |------|-------------------------------------|
-| 0.18 | 0.2, 0.3                            |
+| 0.19 | 0.3                                 |
+| 0.18 | 0.2                                 |
 | 0.17 | 0.1, 0.2                            |
 
 
