@@ -8,7 +8,7 @@ use core::{ffi::CStr, fmt::Display, str::Utf8Error};
 use crate::{host_id::NativeHostIdType};
 
 // We need this import or Cargo complains about panic unwinding vOv
-use bevy::{platform::sync::Arc, prelude::*};
+use cranium_core::bevy::{platform::sync::Arc, prelude::*};
 
 pub type RequestKey = cranium_core::types::RequestKey;
 
@@ -38,7 +38,7 @@ pub unsafe fn ffi_raw_string_from_str_unchecked(inp: &str) -> FFIRawString {
     )
     .map_err(|err| {
         #[cfg(feature = "logging")]
-        bevy::log::error!("Error converting Rust string {} to FFI string - {}", inp, err)
+        cranium_core::bevy::log::error!("Error converting Rust string {} to FFI string - {}", inp, err)
     })
     .map(|s| s.as_ptr())
     .unwrap()

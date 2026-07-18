@@ -12,31 +12,29 @@ repository = "https://github.com/scrdest/Cranium"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["bevy_remote"]}
+bevy_ecs = { version = ">=0.17.0, <0.19.0", default-features = false}
+bevy_reflect = { version = ">=0.17.0, <0.19.0", default-features = false}
 cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "../bevy_plugin", optional = false}
-cranium-core = {version = ">=0.1, <=0.3", path = "../core"}
+cranium-core = {version = ">=0.1, <=0.3", path = "../core", features = ["bevy_remote"]}
 cranium-ffi = {version = "0.3", path = "../cranium_ffi"}
 crossbeam-channel = "0.5.15"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = {version = ">=1.0, <2.0",optional = false}
 
 [dev-dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = [
-  "dynamic_linking", "debug"
-]}
 
 [features]
 default = ["std", "logging", "debug"]
 
-std = ["bevy/std"]
+std = ["cranium-core/std"]
 
-debug = ["bevy/debug"]
+debug = ["cranium-core/debug"]
 
 nostd_support = []
 
 web = []
 
-logging = ["bevy/bevy_log"]
+logging = ["cranium-core/logging"]
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

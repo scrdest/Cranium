@@ -4,7 +4,7 @@ If a copy of the MPL was not distributed with this file,
 You can obtain one at https://mozilla.org/MPL/2.0/. 
 */
 
-use bevy::prelude::*;
+use cranium_core::bevy::prelude::*;
 use cranium_core::actions;
 use cranium_core::action_runtime;
 use cranium_core::action_state;
@@ -17,7 +17,7 @@ use cranium_core::smart_object;
 use cranium_actionset_loader::ActionSetAssetPlugin;
 
 #[cfg(feature = "ai_server")]
-use bevy::remote::RemotePlugin;
+use cranium_core::bevy::remote::RemotePlugin;
 
 pub struct CraniumPlugin; 
 

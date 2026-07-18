@@ -56,7 +56,7 @@ You may also want to have a look at the [Examples folder](examples) for addition
 
 ```rust
 // Include the building blocks from Bevy and Cranium.
-use bevy::prelude::*;
+use cranium_core::bevy::prelude::*;
 use cranium::prelude::*;
 use cranium_bevy_plugin::CraniumPlugin;
 

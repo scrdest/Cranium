@@ -9,12 +9,10 @@ categories = ["game-development", "no-std"]
 repository = "https://github.com/scrdest/Cranium"
 
 [dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false }
 cranium-core = {version = ">=0.1, <=0.3", path = "../core"}
 cranium-actionset-loader = {version = "0.3.0", path = "../actionset_loader", optional = true}
 
 [dev-dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["dynamic_linking"] }
 
 [features]
 default = []
@@ -27,7 +25,7 @@ include_actionset_loader = [
     "cranium-actionset-loader"
 ]
 
-logging = ["bevy/bevy_log", "cranium-core/logging", "cranium-actionset-loader?/logging"]
+logging = ["cranium-core/logging", "cranium-actionset-loader?/logging"]
 
 std = ["cranium-core/std", "cranium-actionset-loader?/std"]
 nostd_support = ["cranium-core/nostd_support", "cranium-actionset-loader?/nostd_support"]

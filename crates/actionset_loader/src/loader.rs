@@ -7,8 +7,8 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use core::marker::PhantomData;
 use core::time::Duration;
 
-use bevy::asset::{AssetLoader, LoadContext, io::Reader};
-use bevy::prelude::*;
+use cranium_core::bevy::asset::{AssetLoader, LoadContext, io::Reader};
+use cranium_core::bevy::prelude::*;
 
 use cranium_core::actionset::{ActionSet};
 use cranium_core::types::CraniumKvMap;
@@ -31,7 +31,7 @@ pub trait ActionSetLoaderBackend: Send + Sync + TypePath + 'static {
 pub mod json_support {
     use super::{ActionSetLoaderBackend, ActionSet};
 
-    #[derive(Default, bevy::prelude::Reflect)]
+    #[derive(Default, bevy_reflect::Reflect)]
     pub struct JsonActionSetLoader;
 
     impl ActionSetLoaderBackend for JsonActionSetLoader {
@@ -52,7 +52,7 @@ pub mod json_support {
 pub mod toml_support {
     use super::{ActionSetLoaderBackend, ActionSet};
 
-    #[derive(Default, bevy::prelude::Reflect)]
+    #[derive(Default, bevy_reflect::Reflect)]
     pub struct TomlActionSetLoader;
 
     impl ActionSetLoaderBackend for TomlActionSetLoader {
@@ -73,7 +73,7 @@ pub mod toml_support {
 pub mod msgpack_support {
     use super::{ActionSetLoaderBackend, ActionSet};
 
-    #[derive(Default, bevy::prelude::Reflect)]
+    #[derive(Default, bevy_reflect::Reflect)]
     pub struct MsgpackActionSetLoader;
 
     impl ActionSetLoaderBackend for MsgpackActionSetLoader {
@@ -94,7 +94,7 @@ pub mod msgpack_support {
 pub mod cbor_support {
     use super::{ActionSetLoaderBackend, ActionSet};
 
-    #[derive(Default, bevy::prelude::Reflect)]
+    #[derive(Default, bevy_reflect::Reflect)]
     pub struct CborActionSetLoader;
 
     impl ActionSetLoaderBackend for CborActionSetLoader {
@@ -115,7 +115,7 @@ pub mod cbor_support {
 pub mod ron_support {
     use super::{ActionSetLoaderBackend, ActionSet};
 
-    #[derive(Default, bevy::prelude::Reflect)]
+    #[derive(Default, bevy_reflect::Reflect)]
     pub struct RonActionSetLoader;
 
     impl ActionSetLoaderBackend for RonActionSetLoader {
@@ -136,7 +136,7 @@ pub mod ron_support {
 pub mod yaml_support {
     use super::{ActionSetLoaderBackend, ActionSet};
 
-    #[derive(Default, bevy::prelude::Reflect)]
+    #[derive(Default, bevy_reflect::Reflect)]
     pub struct YamlActionSetLoader;
 
     impl ActionSetLoaderBackend for YamlActionSetLoader {
@@ -157,7 +157,7 @@ pub mod yaml_support {
 pub mod postcard_support {
     use super::{ActionSetLoaderBackend, ActionSet};
 
-    #[derive(Default, bevy::prelude::Reflect)]
+    #[derive(Default, bevy_reflect::Reflect)]
     pub struct PostcardActionSetLoader;
 
     impl ActionSetLoaderBackend for PostcardActionSetLoader {
@@ -175,7 +175,7 @@ pub mod postcard_support {
 
 
 // Asset loader
-#[derive(Default, bevy::prelude::Reflect)]
+#[derive(Default, bevy_reflect::Reflect)]
 pub struct ActionSetLoader<B: ActionSetLoaderBackend>(PhantomData<B>);
 
 impl<B: ActionSetLoaderBackend> ActionSetLoader<B> {
@@ -318,12 +318,12 @@ fn cleanup_timers_for_loaded_actionsets(
 }
 
 
-#[derive(Default, bevy::prelude::Reflect)]
+#[derive(Default, bevy_reflect::Reflect)]
 pub struct ActionSetAssetPlugin<B: ActionSetLoaderBackend>(PhantomData<B>);
 
 
-impl<B: ActionSetLoaderBackend + Default> bevy::app::Plugin for ActionSetAssetPlugin<B> {
-    fn build(&self, app: &mut bevy::app::App) {
+impl<B: ActionSetLoaderBackend + Default> cranium_core::bevy::app::Plugin for ActionSetAssetPlugin<B> {
+    fn build(&self, app: &mut cranium_core::bevy::app::App) {
         app
         .add_plugins(AssetPlugin::default())
         .init_resource::<ActionSetHandles>()
@@ -339,8 +339,8 @@ impl<B: ActionSetLoaderBackend + Default> bevy::app::Plugin for ActionSetAssetPl
 
 #[cfg(test)]
 mod tests {
-    use bevy::{app::ScheduleRunnerPlugin, prelude::*};
-    use bevy::asset::{io::AssetSourceBuilder};
+    use cranium_core::bevy::{app::ScheduleRunnerPlugin, prelude::*};
+    use cranium_core::bevy::asset::{io::AssetSourceBuilder};
     use crate::ron_support::RonActionSetLoader;
     use crate::yaml_support::YamlActionSetLoader;
 

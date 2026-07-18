@@ -5,6 +5,10 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 #![no_std]
 
+/// This is a re-export of Bevy to allow other crates to link to whatever the core is built around.
+/// This is not really meant to be public, but as of writing there was no nice visibility for this purpose. 
+pub use bevy;
+
 pub mod ai;
 pub mod actions;
 pub mod actionset;

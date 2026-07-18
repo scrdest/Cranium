@@ -8,7 +8,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use core::fmt::Debug;
 
-use bevy::{prelude::*};
+use cranium_core::bevy::{prelude::*};
 
 /// Host ID is the identifier of some entity in third-party software calling INTO Cranium. 
 /// From the Host's PoV, this should be a stable key, even if the underlying captial-E Entity 

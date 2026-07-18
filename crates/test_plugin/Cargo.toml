@@ -9,16 +9,15 @@ categories = ["game-development", "no-std"]
 repository = "https://github.com/scrdest/Cranium"
 
 [dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false }
+bevy_ecs = { version = ">=0.17.0, <0.19.0", default-features = false}
 cranium-core = {version = ">=0.1, <=0.3", path = "../core"}
 
 [dev-dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["dynamic_linking"] }
 
 [features]
 default = ["logging"]
 
-logging = ["bevy/bevy_log", "cranium-core/logging"]
+logging = ["cranium-core/logging"]
 
 std = ["cranium-core/std"]
 nostd_support = ["cranium-core/nostd_support"]

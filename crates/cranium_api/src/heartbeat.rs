@@ -25,7 +25,8 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! of magnitude or two higher than the timeout time or you may observe false negatives.
 
 use core::{num::NonZero, sync::atomic, time::Duration};
-use bevy::{prelude::*};
+use cranium_core::bevy::{prelude::*};
+use cranium_core::bevy::log;
 
 
 pub(crate) static SHOULD_HEARTBEAT: atomic::AtomicBool = atomic::AtomicBool::new(false);
@@ -126,7 +127,7 @@ fn check_heartbeat_system(
 
     if delta > timeout {
         #[cfg(feature = "logging")]
-        bevy::log::error!(
+        log::error!(
             "Cranium received no heartbeat in more than {:?}s (delta:{:?}s, last update time: {:?}s), quitting!", 
             timeout.as_secs(), delta.as_secs(), last_tick.as_secs()
         );

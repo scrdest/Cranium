@@ -20,6 +20,7 @@ members = [
 doctest = false
 
 [dependencies]
+bevy_ecs = { version = ">=0.17.0, <0.19.0", default-features = false}
 cranium-core = {version = ">=0.1, <=0.3", path = "crates/core"}
 cranium-bevy-plugin = {version = ">=0.1, <=0.3", path = "crates/bevy_plugin", optional = true}
 cranium-actionset-loader = {version = "0.3.0", path = "crates/actionset_loader", optional = true}
@@ -28,7 +29,6 @@ cranium-api = {version = "0.3.0", path = "crates/cranium_api", optional = true}
 cranium-ffi = {version = "0.3.0", path = "crates/cranium_ffi", optional = true}
 
 [dev-dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["debug"]}
 cranium-core = {path = "crates/core", features = ["nostd_support"] }
 cranium-bevy-plugin = {path = "crates/bevy_plugin", optional = false}
 cranium-test-plugin = {path = "crates/test_plugin", optional = false}
@@ -36,9 +36,11 @@ cranium-api = {version = "0.3.0", path = "crates/cranium_api", optional = false}
 cranium-ffi = {version = "0.3.0", path = "crates/cranium_ffi", optional = false}
 
 [features]
-default = ["logging", "std", "ai_server"]
+default = ["logging", "std", "ai_server", "debug"]
 
-bevy_dynamic_linking = ["bevy/dynamic_linking"]
+bevy_dynamic_linking = ["cranium-core/bevy_dynamic_linking"]
+
+debug = ["cranium-core/debug"]
 
 std = [
   "cranium-core/std",
@@ -68,7 +70,6 @@ bevy_native = [
 ]
 
 logging = [
-  "bevy/bevy_log", 
   "cranium-core/logging",
   "cranium-actionset-loader?/logging"
 ]
@@ -115,6 +116,7 @@ postcard_support = [
 all = [
   "actionset_loader",
   "ai_server",
+  "debug", 
   "bevy_plugin",
   "bevy_native",
   "testing",

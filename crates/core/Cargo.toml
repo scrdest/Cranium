@@ -30,13 +30,20 @@ actionset_loader = [
 ]
 
 std = ["bevy/std"]
+debug = ["bevy/debug"]
 
 # Uses no_std-friendly replacements for all types affected by no_std-ness. 
 # Note that these may be less performant or otherwise have unique concerns!
 nostd_support = [
 ]
 
+file_watcher = ["bevy/file_watcher"]
+embedded_watcher = ["bevy/embedded_watcher"]
+bevy_dynamic_linking = ["bevy/dynamic_linking"]
+
 logging = ["bevy/bevy_log"]
+
+bevy_remote = ["bevy/bevy_remote"]
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

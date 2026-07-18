@@ -9,7 +9,8 @@ categories = ["game-development", "no-std"]
 repository = "https://github.com/scrdest/Cranium"
 
 [dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["file_watcher", "embedded_watcher"] }
+bevy_ecs = { version = ">=0.17.0, <0.19.0", default-features = false}
+bevy_reflect = { version = ">=0.17.0, <0.19.0", default-features = false}
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { version = "1.0.141", optional = true}
 serde-saphyr = { version = "0.0.14", optional = true}
@@ -18,10 +19,9 @@ ciborium = { version = "0.2.2", optional = true, features = ["std"]}
 rmp-serde = { version = "1.3.1", optional = true}
 ron = { version = "0.12.0", optional = true}
 postcard = { version = "1.1.3", optional = true}
-cranium-core = {version = ">=0.1, <=0.3", path = "../core", features = ["actionset_loader"]}
+cranium-core = {version = ">=0.1, <=0.3", path = "../core", features = ["actionset_loader", "file_watcher", "embedded_watcher"]}
 
 [dev-dependencies]
-bevy = { version = ">=0.17.0, <0.19.0", default-features = false, features = ["dynamic_linking", "file_watcher", "embedded_watcher"] }
 serde_json = { version = "1.0.141", optional = false}
 serde-saphyr = { version = "0.0.14", optional = false}
 ron = { version = "0.12.0", optional = false}
@@ -31,7 +31,6 @@ ron = { version = "0.12.0", optional = false}
 default = []
 
 logging = [
-    "bevy/bevy_log",
     "cranium-core/logging",
 ]
 

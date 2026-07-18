@@ -6,8 +6,8 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use core::marker::PhantomData;
 
-use bevy::platform::collections::HashMap;
-use bevy::prelude::*;
+use cranium_core::bevy::platform::collections::HashMap;
+use cranium_core::bevy::prelude::*;
 use crossbeam_channel;
 use cranium_ffi::{ApiInMsg, StagedApiOutMsg, HostIdType, NativeHostIdType};
 

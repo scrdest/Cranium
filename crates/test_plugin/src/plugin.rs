@@ -4,8 +4,8 @@ If a copy of the MPL was not distributed with this file,
 You can obtain one at https://mozilla.org/MPL/2.0/. 
 */
 #[cfg(feature = "logging")]
-use bevy::log::LogPlugin;
-use bevy::{app::ScheduleRunnerPlugin, prelude::*};
+use cranium_core::bevy::log::LogPlugin;
+use cranium_core::bevy::{app::ScheduleRunnerPlugin, prelude::*};
 
 use crate::helpers::*;
 
@@ -19,7 +19,7 @@ impl Plugin for CraniumTestPlugin {
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(core::time::Duration::from_millis(200))),
             #[cfg(feature = "logging")]
             LogPlugin { 
-                level: bevy::log::Level::DEBUG, 
+                level: cranium_core::bevy::log::Level::DEBUG, 
                 custom_layer: |_| None, 
                 filter: "wgpu=error,bevy_render=info,bevy_ecs=info".to_string(),
                 fmt_layer: |_| None,

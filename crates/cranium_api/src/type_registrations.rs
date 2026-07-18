@@ -15,7 +15,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! 
 //! So, everything that is registered here can be spawned and attached to an Entity.
 
-use bevy::prelude::*;
+use cranium_core::bevy::prelude::*;
 
 use cranium_core::ai::AIController;
 use cranium_core::lods::AILevelOfDetail;

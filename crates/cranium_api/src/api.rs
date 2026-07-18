@@ -6,8 +6,9 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use core::time::Duration;
 use core::{sync::atomic};
 
-use bevy::platform::sync::Arc;
-use bevy::prelude::*;
+use cranium_core::bevy::platform::sync::Arc;
+use cranium_core::bevy::prelude::*;
+use cranium_core::bevy::log;
 
 use cranium_bevy_plugin::CraniumPlugin;
 use cranium_ffi::{ApiInMsg, ApiOutMsg, EntityOperation, NativeHostIdType, RequestKey};
@@ -31,18 +32,18 @@ pub fn create_app() -> App {
     let log_level = option_env!("CRANIUM_LOG_LEVEL")
         .and_then(|s| {
             match s {
-                "DEBUG" => Some(bevy::log::Level::DEBUG),
-                "INFO" => Some(bevy::log::Level::INFO),
-                "WARN" => Some(bevy::log::Level::WARN),
-                "ERROR" => Some(bevy::log::Level::ERROR),
+                "DEBUG" => Some(log::Level::DEBUG),
+                "INFO" => Some(log::Level::INFO),
+                "WARN" => Some(log::Level::WARN),
+                "ERROR" => Some(log::Level::ERROR),
                 _ => None
             }
         })
-        .unwrap_or(bevy::log::Level::INFO);
+        .unwrap_or(log::Level::INFO);
 
     #[cfg(feature = "logging")]
     app.add_plugins(
-        bevy::log::LogPlugin { 
+        log::LogPlugin { 
             level: log_level, 
             custom_layer: |_| None, 
             filter: "wgpu=error,bevy_render=info,bevy_ecs=info".to_string(),
@@ -64,7 +65,7 @@ pub fn configure_for_autorun(mut app: App) -> App {
     ; 
 
     app.add_plugins((
-        MinimalPlugins.set(bevy::app::ScheduleRunnerPlugin::run_loop(core::time::Duration::from_millis(run_rate))),
+        MinimalPlugins.set(cranium_core::bevy::app::ScheduleRunnerPlugin::run_loop(core::time::Duration::from_millis(run_rate))),
         AutoRunHeartbeatPlugin,
         crate::plugin::ApiChannelsPlugin::<NativeHostIdType>::with_default_bounds(),
     ));
@@ -80,7 +81,7 @@ pub fn autorun(mut app: App) {
 pub fn create_and_autorun() {
     let app = configure_for_autorun(create_app());
     #[cfg(feature = "logging")]
-    bevy::log::info!("Created a Cranium Server app, running...");
+    log::info!("Created a Cranium Server app, running...");
     autorun(app);
 }
 
@@ -252,7 +253,7 @@ fn request_spawn_logic<I: Into<NativeHostIdType>>(
         },
         Err(e) => {
             #[cfg(feature = "logging")]
-            bevy::log::error!("Error parsing Components spec {:?} for cranium_request_spawn_u64 - {:?}",
+            log::error!("Error parsing Components spec {:?} for cranium_request_spawn_u64 - {:?}",
                 components,
                 e
             );
