@@ -168,8 +168,10 @@ impl AiActionDispatchToUserCode {
 
 #[derive(Message)]
 pub struct NoDecisionMessage {
-    pub entity: Entity,
+    pub entity: Option<Entity>,
     pub request_key: Option<RequestKey>,
+    /// IMPORTANT: If used, comments are meant to be hardcoded, NUL-TERMINATED strings. 
+    /// The nul at the end is critical for FFI-safety - failure to include may cause panics. 
     pub comment: Option<&'static str>,
 }
 

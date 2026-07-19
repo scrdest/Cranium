@@ -196,9 +196,9 @@ pub fn decision_engine(
         bevy::log::debug!("decision_engine: Decision request target {:?} is not an AI - ignoring the request.", audience);
         commands.write_message(
             NoDecisionMessage {
-                entity: event.entity,
+                entity: Some(event.entity),
                 request_key: event.request_key,
-                comment: Some("Target is not an AI!"),
+                comment: Some("Target is not an AI!\0"),
             }
         );
         return;
@@ -219,9 +219,9 @@ pub fn decision_engine(
         bevy::log::debug!("decision_engine: AI {:?} disabled by LOD - ignoring decision request.", audience);
         commands.write_message(
             NoDecisionMessage {
-                entity: event.entity,
+                entity: Some(event.entity),
                 request_key: event.request_key,
-                comment: Some("Target LOD is below the processing threshold."),
+                comment: Some("Target LOD is below the processing threshold.\0"),
             }
         );
         return;
@@ -248,9 +248,9 @@ pub fn decision_engine(
             #[cfg(feature = "logging")]
             bevy::log::debug!("decision_engine: AI {:?} - no SmartObjects available, idling", audience);
             commands.write_message(NoDecisionMessage {
-                entity: event.entity,
+                entity: Some(event.entity),
                 request_key: event.request_key.clone(),
-                comment: Some("Target has no SmartObjects available."),
+                comment: Some("Target has no SmartObjects available.\0"),
             });
             return;
         }
@@ -739,9 +739,9 @@ pub fn decision_engine(
 
     if let Some(_abort_reason) = abort_processing {
         commands.write_message(NoDecisionMessage {
-            entity: event.entity,
+            entity: Some(event.entity),
             request_key: event.request_key.clone(),
-            comment: Some("Decision Engine run aborted due to a serious error!"),
+            comment: Some("Decision Engine run aborted due to a serious error!\0"),
         });
         return;
     }
@@ -754,9 +754,9 @@ pub fn decision_engine(
                 &audience,
             );
             commands.write_message(NoDecisionMessage {
-                entity: event.entity,
+                entity: Some(event.entity),
                 request_key: event.request_key.clone(),
-                comment: Some("No suitable Actions found!"),
+                comment: Some("No suitable Actions found!\0"),
             });
         }
         Some(best_tuple) => {

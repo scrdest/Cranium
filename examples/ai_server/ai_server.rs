@@ -54,16 +54,20 @@ unsafe extern "C" {
     safe fn cranium_write_ping() -> bool;
     safe fn cranium_request_spawn_u64(host_id: u64, components: *const core::ffi::c_char, request_key: RequestKey);
     safe fn cranium_request_spawn_u32(host_id: u32, components: *const core::ffi::c_char, request_key: RequestKey);
-    safe fn cranium_request_spawn_i32(host_id: i32, components: *const core::ffi::c_char, request_key: RequestKey);
     safe fn cranium_request_spawn_i64(host_id: i64, components: *const core::ffi::c_char, request_key: RequestKey);
+    safe fn cranium_request_spawn_i32(host_id: i32, components: *const core::ffi::c_char, request_key: RequestKey);
+    safe fn cranium_request_spawn_batch_u64(batch: cranium_ffi::FFISpawnRequestBatch<u64>, request_key: RequestKey);
+    safe fn cranium_request_spawn_batch_u32(batch: cranium_ffi::FFISpawnRequestBatch<u32>, request_key: RequestKey);
+    safe fn cranium_request_spawn_batch_i64(batch: cranium_ffi::FFISpawnRequestBatch<i64>, request_key: RequestKey);
+    safe fn cranium_request_spawn_batch_i32(batch: cranium_ffi::FFISpawnRequestBatch<u32>, request_key: RequestKey);
     safe fn cranium_request_despawn_u64(host_id: u64, request_key: RequestKey);
     safe fn cranium_request_despawn_u32(host_id: u32, request_key: RequestKey);
-    safe fn cranium_request_despawn_i32(host_id: i32, request_key: RequestKey);
     safe fn cranium_request_despawn_i64(host_id: i64, request_key: RequestKey);
+    safe fn cranium_request_despawn_i32(host_id: i32, request_key: RequestKey);
     safe fn cranium_request_decision_u64(host_id: u64, request_key: RequestKey);
     safe fn cranium_request_decision_u32(host_id: u32, request_key: RequestKey);
-    safe fn cranium_request_decision_i32(host_id: i32, request_key: RequestKey);
     safe fn cranium_request_decision_i64(host_id: i64, request_key: RequestKey);
+    safe fn cranium_request_decision_i32(host_id: i32, request_key: RequestKey);
 }
 
 /// A trivial Rusty wrapper for the extern function to make thread::spawn happy.
@@ -112,9 +116,19 @@ fn main() {
         ctr += 1;
 
         if ctr == 1 {
-            println!("Sending a valid spawn RequestKey=1 ID=5 (u64) request...");
+            println!("Sending a valid spawn batch RequestKey=1 IDs=[4, 5] (u64) request...");
 
-            let payload = unsafe { 
+            let payload_one = unsafe { 
+                // NOTE: This is only Unsafe because we have to ensure the nul-terminator is here.
+                cranium_ffi::ffi_raw_string_from_str_unchecked(
+                    "{
+                        \"IntPosition2d\": {\"x\": 51, \"y\": -15},
+                        \"AIController\": {}
+                    }\0"
+                ) 
+            };
+
+            let payload_two = unsafe { 
                 // NOTE: This is only Unsafe because we have to ensure the nul-terminator is here.
                 cranium_ffi::ffi_raw_string_from_str_unchecked(
                     "{
@@ -124,11 +138,27 @@ fn main() {
                 ) 
             };
 
-            cranium_request_spawn_u64(5, payload, 1);
+            let c_batch = cranium_ffi::FFIVec::from(vec![
+                cranium_ffi::FFISpawnRequest {
+                    host_id: 4,
+                    components: payload_one,
+                },
+                cranium_ffi::FFISpawnRequest {
+                    host_id: 5,
+                    components: payload_two,
+                }
+            ]);
+
+            let batchsize = c_batch.len();
+
+            cranium_request_spawn_batch_u64(c_batch, 1);
             
-            let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
-            if let Some(msg) = maybe_msg {
-                println!("Received a message: {}", msg);
+            // We send multiple requests batched, so we'll await for confirmation from the whole lot.
+            for _ in 0..batchsize {
+                let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();
+                if let Some(msg) = maybe_msg {
+                    println!("Received a message: {}", msg);
+                }
             }
         }
 
@@ -176,24 +206,29 @@ fn main() {
             println!("Sending a valid spawn RequestKey=9001 ID=-1009 (i32) request...");
             cranium_request_spawn_i32(
                 -1009, 
-                cranium_ffi::ffi_raw_string_from_str(
+                unsafe { 
+                    // SAFETY: The nul-terminator is right there (the '\0')
+                    cranium_ffi::ffi_raw_string_from_str_unchecked(
                     "{
                         \"IntPosition2d\": {\"x\": 15, \"y\": -51},
                         \"AIController\": {}
                     }\0"
-                ), 
+                ) }, 
                 9001
             );
 
             println!("Sending a valid spawn RequestKey=1009 ID=-9001 (i64) request...");
             cranium_request_spawn_i64(
                 -9001, 
-                cranium_ffi::ffi_raw_string_from_str(
-                    "{
-                        \"IntPosition2d\": {\"x\": 15, \"y\": -51},
-                        \"AIController\": {}
-                    }\0"
-                ),
+                unsafe {
+                    // SAFETY: The nul-terminator is right there (the '\0')
+                    cranium_ffi::ffi_raw_string_from_str_unchecked(
+                        "{
+                            \"IntPosition2d\": {\"x\": 15, \"y\": -51},
+                            \"AIController\": {}
+                        }\0"
+                    )
+                },
                 1009
             );
             
@@ -233,10 +268,10 @@ fn main() {
             println!("Sending a RequestKey=1337 ID=9001 (u32), AI Decision request...");
             cranium_request_decision_u32(9001u32, 1337);
             
-            println!("Sending a RequestKey=1234 ID=-1009 (i32), AI Decision request...");
+            println!("Sending a RequestKey=7332 ID=-1009 (i32), AI Decision request...");
             cranium_request_decision_i32(-1009, 7332);
             
-            println!("Sending a RequestKey=7332 ID=-9001 (i64), AI Decision request...");
+            println!("Sending a RequestKey=2337 ID=-9001 (i64), AI Decision request...");
             cranium_request_decision_i64(-9001, 2337);
             
             let maybe_msg: Option<ApiOutMsg> = cranium_try_get_message_with_default_timeout().into();

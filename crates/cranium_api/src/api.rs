@@ -6,12 +6,16 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use core::time::Duration;
 use core::{sync::atomic};
 
-use cranium_core::bevy::platform::sync::Arc;
 use cranium_core::bevy::prelude::*;
 use cranium_core::bevy::log;
 
 use cranium_bevy_plugin::CraniumPlugin;
-use cranium_ffi::{ApiInMsg, ApiOutMsg, EntityOperation, NativeHostIdType, RequestKey};
+use cranium_ffi::{
+    ApiInMsg, ApiOutMsg, EntityOperation, NativeHostIdType, RequestKey, 
+    ffi_trait::*,
+    FFISpawnRequestBatch,
+    FFIDespawnRequestBatch,
+};
 
 use crate::channels;
 use crate::heartbeat::SHOULD_HEARTBEAT;
@@ -90,6 +94,11 @@ pub fn shutdown() -> bool {
         ch.send(ApiInMsg::Shutdown).err()
     })
     .flatten()
+    .map(|e| {
+        #[cfg(feature = "logging")]
+        log::error!("Cranium channel send error: {}", e);
+        e
+    })
     .is_none()
     ;
 
@@ -127,6 +136,11 @@ pub fn write_ping() -> bool {
         ch.send(ApiInMsg::Ping).err()
     })
     .flatten()
+    .map(|e| {
+        #[cfg(feature = "logging")]
+        log::error!("Cranium channel send error: {}", e);
+        e
+    })
     .is_none()
     ;
 
@@ -155,6 +169,11 @@ pub fn request_spawn<I: Into<NativeHostIdType>>(
         }).err()
     })
     .flatten()
+    .map(|e| {
+        #[cfg(feature = "logging")]
+        log::error!("Cranium channel send error: {}", e);
+        e
+    })
     .is_none()
     ;
 
@@ -181,30 +200,197 @@ pub fn request_despawn<I: Into<NativeHostIdType>>(
         }).err()
     })
     .flatten()
+    .map(|e| {
+        #[cfg(feature = "logging")]
+        log::error!("Cranium channel send error: {}", e);
+        e
+    })
     .is_none()
     ;
 
     success
 }
 
+/// Handles spawning/updating data for a batch of input HostIDs. 
+/// 
+/// Returns a u64 signalling how many items in the batch had been successfully processed. 
+/// 
+/// In a normal happy-path case, this should be the same as the length of the input batch.
+/// 
+/// In case of a syntax error in the request, this will be the count of items up until the 
+/// first failed item, and no further items in the batch will be processed (and therefore, 
+/// the returned u64 can be used to find out the index of the first problematic batch member).
+/// 
+/// In case of a message send error, the returned value will be 0 to signal none of the members 
+/// of the batch will have been processed (as they will never have made it to the actual systems 
+/// that handle the processing, since the message pipe has failed).
+/// 
+/// Note that the returned value is a *count*, not an index (i.e. it's 1-based, not 0-based)!
+pub fn request_spawn_batch<I: Into<NativeHostIdType> + TriviallyFFIReadable + Clone>(
+    batch: FFISpawnRequestBatch<I>, 
+    request_key: RequestKey,
+) -> u64 {
+    // As a UX convenience, spawning entities is treated as a heartbeat signal too.
+    SHOULD_HEARTBEAT.store(true, atomic::Ordering::Release);
+
+    let mut successful = true;
+    let mut last_processed_idx = 0u64;
+
+    let ops = Vec::from_iter(
+        batch.iter().enumerate().filter_map(|(idx, inp)| {
+            match successful {
+                false => {
+                    None
+                }, 
+                
+                true => {
+                    last_processed_idx = (1+idx) as u64;
+
+                    match unsafe { 
+                        inp.components.try_ffi_read_unsafe() 
+                    } {
+                        Ok(components) => {
+                            Some(EntityOperation::UpsertEntity { 
+                                host_id: inp.host_id.clone().into(), 
+                                components: components, 
+                                request_key 
+                            })
+                        }
+                        Err(e) => {
+                            #[cfg(feature = "logging")]
+                            log::error!("Error parsing Components spec {:?} for request_spawn_batch - {:?}",
+                                inp.components,
+                                e
+                            );
+                            successful = false;
+                            None
+                        }
+                    }
+                }
+            }
+        })
+    );
+
+    let sent = {
+        channels::IN_CHANNEL.get().map(|ch| {
+            ch.send(ApiInMsg::SyncBatch { 
+                ops: ops
+            }).err()
+        })
+        .flatten()
+        .map(|e| {
+            #[cfg(feature = "logging")]
+            log::error!("Cranium channel send error: {}", e);
+            e
+        })
+        .is_none()
+    };
+
+    match sent {
+        false => 0, // if nothing was sent, then we effectively processed zero elements
+        true => last_processed_idx
+    }
+}
+
+/// Handles despawning Entities for a batch of input HostIDs. 
+/// 
+/// Returns a u64 signalling how many items in the batch had been successfully processed. 
+/// 
+/// In a normal happy-path case, this should be the same as the length of the input batch.
+/// 
+/// In case of a syntax error in the request, this will be the count of items up until the 
+/// first failed item, and no further items in the batch will be processed (and therefore, 
+/// the returned u64 can be used to find out the index of the first problematic batch member).
+/// 
+/// In case of a message send error, the returned value will be 0 to signal none of the members 
+/// of the batch will have been processed (as they will never have made it to the actual systems 
+/// that handle the processing, since the message pipe has failed).
+/// 
+/// Note that the returned value is a *count*, not an index (i.e. it's 1-based, not 0-based)!
+pub fn request_despawn_batch<I: Into<NativeHostIdType> + TriviallyFFIReadable + Clone>(
+    batch: FFIDespawnRequestBatch<I>, 
+    request_key: RequestKey,
+) -> u64 {
+    // As a UX convenience, spawning entities is treated as a heartbeat signal too.
+    SHOULD_HEARTBEAT.store(true, atomic::Ordering::Release);
+
+    let ops = Vec::from_iter(
+        batch.iter().map(|inp| {
+                EntityOperation::RemoveEntity { 
+                    host_id: inp.host_id.clone().into(), 
+                    request_key 
+                }
+            }
+        )
+    );
+
+    let ops_size = ops.len();
+
+    let sent = channels::IN_CHANNEL.get().map(|ch| {
+        ch.send(ApiInMsg::SyncBatch { 
+            ops: ops
+        }).err()
+    })
+    .flatten()
+    .map(|e| {
+        #[cfg(feature = "logging")]
+        log::error!("Error sending a FFIDespawnRequestBatch - {:?}", e);
+        e
+    })
+    .is_none()
+    ;
+
+    match sent {
+        false => 0,
+        true => ops_size as u64
+    }
+}
+
 pub fn request_decision<I: Into<NativeHostIdType>>(host_id: I, request_key: RequestKey) -> bool {
     // As a UX convenience, querying AIs is treated as a heartbeat signal too.
     SHOULD_HEARTBEAT.store(true, atomic::Ordering::Release);
 
-    let string_cast = request_key;
-
     let ops = vec![
-        (string_cast, host_id.into())
+        (request_key, host_id.into())
     ];
 
     let success = channels::IN_CHANNEL.get().map(|ch| {
         ch.send(ApiInMsg::RequestDecision { targets: ops }).err()
     })
     .flatten()
+    .map(|e| {
+        #[cfg(feature = "logging")]
+        log::error!("Cranium channel send error: {}", e);
+        e
+    })
     .is_none()
     ;
 
     success
+}
+
+fn request_spawn_logic<I: Into<NativeHostIdType>>(
+    host_id: I, 
+    components: cranium_ffi::FFIRawString,
+    request_key: RequestKey,
+) -> bool {
+    match unsafe { 
+        // SAFETY: Invariants must be upheld by the C API users.
+        //         See docs on core::ffi::CStr::from_ptr() for a full list.
+        components.try_ffi_read_unsafe() 
+    } {
+        Ok(safe_components) => {
+            request_spawn(host_id, safe_components, request_key)
+        },
+        Err(e) => {
+            #[cfg(feature = "logging")]
+            log::error!("Error parsing Components spec {:?} for request_spawn_logic - {:?}",
+                components,
+                e
+            );
+            false
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -242,86 +428,81 @@ pub extern "C" fn cranium_write_ping() -> bool {
     write_ping()
 }
 
-fn request_spawn_logic<I: Into<NativeHostIdType>>(
-    host_id: I, 
-    components: cranium_ffi::FFIRawString,
-    request_key: RequestKey,
-) -> bool {
-    match unsafe { cranium_ffi::try_ingest_string_from_ffi_raw_string(components) } {
-        Ok(safe_components) => {
-            request_spawn(host_id, safe_components, request_key)
-        },
-        Err(e) => {
-            #[cfg(feature = "logging")]
-            log::error!("Error parsing Components spec {:?} for cranium_request_spawn_u64 - {:?}",
-                components,
-                e
-            );
-            false
+
+// One of the great joys of C is that we have no generics, so we need to implement a wrapper function 
+// for every single one of the types that we want to support. This macro automates that somewhat, making 
+// it easier to add new supported types or functions in the future.
+// 
+// It currently requires writing out the names of all the implemented functions, as I couldn't be bothered 
+// to add in `paste` as a dependency and I kind of like the explicitness. 
+macro_rules! impl_ffi_methods_for_type {
+    (
+        $spawn_name:ident, 
+        $despawn_name:ident, 
+        $spawn_batch_name:ident, 
+        $despawn_batch_name:ident, 
+        $decision_name:ident, 
+        $ty:ty
+    ) => {
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $spawn_name(host_id: $ty, components: cranium_ffi::FFIRawString, request_key: RequestKey) -> bool {
+            request_spawn_logic(host_id, components, request_key)
         }
-    }
+        
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $despawn_name(host_id: $ty, request_key: RequestKey) -> bool {
+            request_despawn(host_id, request_key)
+        }
+        
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $spawn_batch_name(batch: FFISpawnRequestBatch<$ty>, request_key: RequestKey) -> u64 {
+            request_spawn_batch(batch, request_key)
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $despawn_batch_name(batch: FFIDespawnRequestBatch<$ty>, request_key: RequestKey) -> u64 {
+            request_despawn_batch(batch, request_key)
+        }
+        
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $decision_name(host_id: $ty, request_key: RequestKey) -> bool {
+            request_decision(host_id, request_key)
+        }
+    };
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_spawn_u64(
-    host_id: u64, 
-    components: cranium_ffi::FFIRawString,
-    request_key: RequestKey,
-) -> bool {
-    request_spawn_logic(host_id, components, request_key)
-}
+impl_ffi_methods_for_type!(
+    cranium_request_spawn_u64, 
+    cranium_request_despawn_u64, 
+    cranium_request_spawn_batch_u64, 
+    cranium_request_despawn_batch_u64, 
+    cranium_request_decision_u64, 
+    u64
+);
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_spawn_u32(host_id: u32, components: cranium_ffi::FFIRawString, request_key: RequestKey) -> bool {
-    request_spawn_logic(host_id, components, request_key)
-}
+impl_ffi_methods_for_type!(
+    cranium_request_spawn_u32, 
+    cranium_request_despawn_u32, 
+    cranium_request_spawn_batch_u32, 
+    cranium_request_despawn_batch_u32, 
+    cranium_request_decision_u32, 
+    u32
+);
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_spawn_i32(host_id: i32, components: cranium_ffi::FFIRawString, request_key: RequestKey) -> bool {
-    request_spawn_logic(host_id, components, request_key)
-}
+impl_ffi_methods_for_type!(
+    cranium_request_spawn_i64, 
+    cranium_request_despawn_i64, 
+    cranium_request_spawn_batch_i64, 
+    cranium_request_despawn_batch_i64, 
+    cranium_request_decision_i64, 
+    i64
+);
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_spawn_i64(host_id: i64, components: cranium_ffi::FFIRawString, request_key: RequestKey) -> bool {
-    request_spawn_logic(host_id, components, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_despawn_u64(host_id: u64, request_key: RequestKey) -> bool {
-    request_despawn(host_id, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_despawn_u32(host_id: u32, request_key: RequestKey) -> bool {
-    request_despawn(host_id, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_despawn_i32(host_id: i32, request_key: RequestKey) -> bool {
-    request_despawn(host_id, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_despawn_i64(host_id: i64, request_key: RequestKey) -> bool {
-    request_despawn(host_id, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_decision_u64(host_id: u64, request_key: RequestKey) -> bool {
-    request_decision(host_id, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_decision_u32(host_id: u32, request_key: RequestKey) -> bool {
-    request_decision(host_id, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_decision_i32(host_id: i32, request_key: RequestKey) -> bool {
-    request_decision(host_id, request_key)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn cranium_request_decision_i64(host_id: i64, request_key: RequestKey) -> bool {
-    request_decision(host_id, request_key)
-}
+impl_ffi_methods_for_type!(
+    cranium_request_spawn_i32, 
+    cranium_request_despawn_i32, 
+    cranium_request_spawn_batch_i32, 
+    cranium_request_despawn_batch_i32, 
+    cranium_request_decision_i32, 
+    i32
+);

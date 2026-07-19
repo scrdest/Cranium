@@ -5,7 +5,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 use core::{ffi::CStr, fmt::Display, str::Utf8Error};
 
-use crate::{host_id::NativeHostIdType};
+use crate::{TriviallyFFIReadable, host_id::NativeHostIdType};
 
 // We need this import or Cargo complains about panic unwinding vOv
 use cranium_core::bevy::{platform::sync::Arc, prelude::*};
@@ -21,6 +21,29 @@ pub type FFIRawString = *const core::ffi::c_char;
 /// Alias for the standard Cranium representation of FFI string data safely 
 /// shepherded into the safe confines of Cranium's own invariants.
 pub type FFIIngestedString = Arc<String>;
+
+pub type FFISafeInString<'a> = safer_ffi::prelude::char_p::Ref<'a>;
+pub type FFISafeOutString = safer_ffi::string::String;
+
+/// Alias for an FFI-friendly Vec representation.
+pub type FFIVec<T> = safer_ffi::vec::Vec<T>;
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct FFISpawnRequest<I: Into<NativeHostIdType> + TriviallyFFIReadable + Clone> {
+    pub host_id: I,
+    pub components: FFIRawString,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct FFIDespawnRequest<I: Into<NativeHostIdType> + TriviallyFFIReadable + Clone> {
+    pub host_id: I,
+}
+
+pub type FFISpawnRequestBatch<T> = FFIVec<FFISpawnRequest<T>>;
+pub type FFIDespawnRequestBatch<T> = FFIVec<FFIDespawnRequest<T>>;
+
 
 /// Turns a normal Rust &str into Cranium's FFI-friendly representation.
 /// 
@@ -48,21 +71,8 @@ pub unsafe fn ffi_raw_string_from_str_unchecked(inp: &str) -> FFIRawString {
 ///  
 /// Primarily intended as a convenience for testing FFI calls from Rust 
 /// because it's a pretty gnarly piece of boilerplate in those scenarios. 
-pub fn ffi_raw_string_from_str(inp: &str) -> FFIRawString {
-    let padded_inp: &'static str = format!("{}\0", inp).leak();
-    let ffi_str = unsafe { 
-        // SAFETY: we've manually added a terminator above, 
-        // so there will always be at least one. 
-        ffi_raw_string_from_str_unchecked(&padded_inp) 
-    };
-    ffi_str
-}
-
-/// Turns the FFIRawString into something slightly more Rust-palatable. 
-/// 
-/// This is intended purely for internal use for abstraction and boilerplate reduction.
-pub unsafe fn ingest_string_from_ffi_raw_string<'a>(inp: FFIRawString) -> FFIIngestedString {
-    unsafe { try_ingest_string_from_ffi_raw_string(inp) }.unwrap()
+pub fn ffi_raw_string_from_str(inp: &str) -> FFISafeOutString {
+    FFISafeOutString::from(inp)
 }
 
 /// Fallibly turns the FFIRawString into something slightly more Rust-palatable. 
@@ -72,6 +82,19 @@ pub unsafe fn try_ingest_string_from_ffi_raw_string<'a>(inp: FFIRawString) -> Re
     // We copy this over to an owned String ASAP to make sure nobody can mess up the data 
     // the pointer is pointer-ing to; after that point, we have ensured a nice safe value.
     unsafe { core::ffi::CStr::from_ptr(inp) }.to_str().map(|s| Arc::new(s.to_string())) }
+
+
+/// This is a safer_ffi-backed variant of ingest_string_from_ffi_raw_string. 
+/// Unlike its non-safer_ffi sibling, it is *entirely* safe.
+pub fn safer_ingest_string_from_ffi_raw_string<'a>(inp: FFISafeInString) -> FFIIngestedString {
+    // We copy this over to an owned String ASAP to make sure nobody can mess up the data 
+    // the pointer is pointer-ing to; after that point, we have ensured a nice safe value.
+    Arc::new(inp.to_string())
+}
+
+pub fn safe_output_string_from_rust_string(inp: String) -> FFISafeOutString {
+    FFISafeOutString::from(inp)
+}
 
 
 /// A tiny reimplementation of Option<T> with a guaranteed repr(C) 
@@ -117,11 +140,11 @@ impl<T> From<Option<T>> for FFIOption<T> {
     }
 }
 
-impl<T> Into<Option<T>> for FFIOption<T> {
-    fn into(self) -> Option<T> {
-        match self {
-            Self::None => Option::None,
-            Self::Some(v) => Option::Some(v)
+impl<T> From<FFIOption<T>> for Option<T> {
+    fn from(value: FFIOption<T>) -> Self {
+        match value {
+            FFIOption::None => Option::None,
+            FFIOption::Some(v) => Option::Some(v)
         }
     }
 }
@@ -276,6 +299,20 @@ pub enum StagedApiOutMsg {
     EntityDespawnError(FFIOption<NativeHostIdType>, RequestKey, Arc<String>), 
 }
 
+impl StagedApiOutMsg {
+    /// Retrieves a string FFI message from a variant (if applicable and present) 
+    /// for the purposes of stashing it into a resource until the consumer officially 
+    /// confirms it's been received.
+    pub fn get_message_for_stashing(&self) -> Option<(FFIIngestedString, RequestKey)> {
+        match self {
+            Self::NoActionChosen { host_agent_id: _, request_key, comment } => comment.as_ref().map(|s| (s.clone(), *request_key)),
+            Self::EntitySpawnError(_id, rqk, err) => Some((err.clone(), *rqk)),
+            Self::EntityDespawnError(_id, rqk, err) => Some((err.clone(), *rqk)),
+            _ => None,
+        }
+    }
+}
+
 impl Into<ApiOutMsg> for StagedApiOutMsg {
     fn into(self) -> ApiOutMsg {
         match self {
@@ -300,7 +337,10 @@ impl Into<ApiOutMsg> for StagedApiOutMsg {
                     host_agent_id, 
                     request_key, 
                     comment: match comment {
-                        Some(v) => FFIOption::Some(ffi_raw_string_from_str(&v)),
+                        Some(v) => FFIOption::Some(unsafe { 
+                            // SAFETY: We only ever call this with nul-terminated inputs.
+                            ffi_raw_string_from_str_unchecked(&v) 
+                        }),
                         None => FFIOption::None
                     } 
                 }
@@ -309,7 +349,10 @@ impl Into<ApiOutMsg> for StagedApiOutMsg {
                 ApiOutMsg::EntitySpawnSuccessful(id, request_key)
             },
             Self::EntitySpawnError(id, request_key, errmsg) => {
-                let ffi_string = ffi_raw_string_from_str(&errmsg);
+                let ffi_string = unsafe { 
+                    // SAFETY: All call-sites generating the message pad the strings with NULs.
+                    ffi_raw_string_from_str_unchecked(&errmsg) 
+                };
                 ApiOutMsg::EntitySpawnError(
                     id, 
                     request_key, 
@@ -320,7 +363,10 @@ impl Into<ApiOutMsg> for StagedApiOutMsg {
                 ApiOutMsg::EntityDespawnSuccessful(id, request_key)
             },
             Self::EntityDespawnError(id, request_key, errmsg) => {
-                let ffi_string = ffi_raw_string_from_str(&errmsg);
+                let ffi_string = unsafe { 
+                    // SAFETY: All call-sites generating the message use a nul-terminated static str.
+                    ffi_raw_string_from_str_unchecked(&errmsg) 
+                };
                 ApiOutMsg::EntityDespawnError(
                     id, 
                     request_key, 

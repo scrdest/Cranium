@@ -18,3 +18,4 @@ pub(crate) mod spawn;
 pub(crate) mod type_registrations;
 
 pub use api::*;
+pub use plugin::{ApiChannelsPlugin};

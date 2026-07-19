@@ -5,7 +5,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 use core::time::Duration;
 
-use cranium_core::bevy::platform::collections::HashMap;
+use cranium_core::bevy::platform::collections::{HashMap, HashSet};
 use cranium_core::bevy::platform::sync::Arc;
 use cranium_core::bevy::prelude::*;
 use cranium_core::bevy::{platform::sync::{OnceLock}};
@@ -166,16 +166,64 @@ pub(crate) fn process_input_messages(
 }
 
 
-pub(crate) fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
+/// Stashes Arc<T>'d FFI strings until the reader can confirm their receipt.
+#[derive(Resource)]
+pub(crate) struct SentMessageStore {
+    pub(crate) stash: HashMap<RequestKey, Arc<String>>,
+    pub(crate) insert_time: HashSet<(u64, RequestKey)>, 
+}
+
+
+pub(crate) fn process_queued_output_messages<const TIMEOUT_MILISECONDS: u64>(
     out_channel: ResMut<ApiOutputChannel>,
+    time: Res<Time<Real>>, 
+    mut string_stash: ResMut<SentMessageStore>,
     mut message_queue: MessageReader<QueuedApiOutMessage>, 
 ) {
     for (queued_msg, msg_id) in message_queue.read_with_id() {
-        let output_message = queued_msg.0.clone().into();
+        let output_message = &queued_msg.0;
+
+        /* 
+           This is quite funky, so it deserves an explanation:
+           
+           We want to be able to send strings out to the C consumer world.
+           Therefore, we cannot drop Arcs of the strings until we know the 
+           DLL consumer no longer uses them.
+
+           Now, we could just leak the strings, but that would mean gradually 
+           polluting more and more of the host RAM with strings nobody needs.
+
+           Instead, we stash 'em in a Resource which holds an owned Arc<T> of 
+           these FFI strings, which prevents them from being dropped too early. 
+
+           HOWEVER, they still exist in something we can audit and clean up, 
+           either via a housekeeping/GC-type process, or by giving consumers an 
+           explicit 'hey I don't need this no more' DLL method.
+
+           Because we are using Arcs across the board, this also means any 
+           OTHER references to those strings (e.g. in Messages) remain valid 
+           until they are dropped there as well, so the consumer cannot mess up 
+           the memory that is still used by Cranium proper even if they wash their 
+           hands off of that string - that just means THEY no longer prevent the cleanup. 
+        */
+        match output_message.get_message_for_stashing() {
+            None => (),
+            Some((msgstring, request_key)) => {
+                string_stash.stash
+                .entry(request_key)
+                .insert(msgstring)
+                ;
+
+                // Track insertion time so that we can expire any super old keys. 
+                string_stash.insert_time
+                .insert((time.elapsed_wrapped().as_secs(), request_key))
+                ;
+            }
+        }
 
         let result = out_channel.sender.send_timeout(
-            output_message, 
-            Duration::from_secs(TIMEOUT_SECONDS)
+            output_message.clone(), 
+            Duration::from_millis(TIMEOUT_MILISECONDS)
         );
 
         match result {
@@ -190,6 +238,26 @@ pub(crate) fn process_queued_output_messages<const TIMEOUT_SECONDS: u64>(
                 break;
             }
         }
+    }
+}
+
+pub fn stashed_message_housekeeping<const MAX_STRING_AGE_SECONDS: u64>(
+    time: Res<Time<Real>>, 
+    mut string_stash: ResMut<SentMessageStore>,
+) {
+    let now = time.elapsed_wrapped().as_secs();
+
+    let removes: Vec<(u64, u64)> = string_stash.insert_time.iter().filter_map(|(ins_time, key)| {
+        let delta = (now - ins_time);
+        match delta > MAX_STRING_AGE_SECONDS {
+            true => Some((ins_time.clone(), key.clone())),
+            false => None,
+        }
+    }).collect();
+
+    for (rem_time, rem_key) in removes {
+        string_stash.stash.remove(&rem_key);
+        string_stash.insert_time.remove(&(rem_time, rem_key));
     }
 }
 
@@ -246,54 +314,58 @@ pub(crate) fn decision_requested_msg_handler<I: HostIdType + 'static>(
 ) {
     in_messages.read_with_id().for_each(|(msg, msg_id)| {
         host_id_registry
-        .0.get(&msg.target)
-        .map_or_else(
-            || {
-                #[cfg(feature = "logging")]
-                log::error!("Decision requested for an unrecognized/untracked Entity! MsgId: {:?} | RqKey: {:?} | HostId: {:?}", 
-                    msg_id, 
-                    msg.request_key, 
-                    msg.target
-                );
-            }, 
-            |local_entity| {
-                let smart_objects = so_query
-                    .get(*local_entity)
-                    .map(|so_data| so_data)
-                    .ok()
-                ;
-                
-                match smart_objects {
-                    Some(sos) => {
-                        #[cfg(feature = "logging")]
-                        log::debug!(
-                            "Triggered a Decision request for Entity {} with {} SmartObject ActionSets.", 
-                            local_entity,
-                            sos.actionset_refs.len()
-                        );
-                        commands.trigger(AiDecisionRequested {
-                            entity: *local_entity,
-                            request_key: Some(msg.request_key.clone()),
-                            smart_objects: Some(sos.clone()),
-                        });
-                    },
+        .0
+        .get(&msg.target)
+        .or_else(|| {
+            #[cfg(feature = "logging")]
+            log::error!("Decision requested for an unrecognized/untracked Entity! MsgId: {:?} | RqKey: {:?} | HostId: {:?}", 
+                msg_id, 
+                msg.request_key, 
+                msg.target
+            );
+            failure_messages.write(NoDecisionMessage {
+                entity: None,
+                request_key: Some(msg.request_key.clone()),
+                comment: Some("Decision requested for an unrecognized/untracked Entity!\0")
+            });
+            None
+        })
+        .map(|local_entity| {
+            let smart_objects = so_query
+                .get(*local_entity)
+                .map(|so_data| so_data)
+                .ok()
+            ;
+            
+            match smart_objects {
+                Some(sos) => {
+                    #[cfg(feature = "logging")]
+                    log::debug!(
+                        "Triggered a Decision request for Entity {} with {} SmartObject ActionSets.", 
+                        local_entity,
+                        sos.actionset_refs.len()
+                    );
+                    commands.trigger(AiDecisionRequested {
+                        entity: *local_entity,
+                        request_key: Some(msg.request_key.clone()),
+                        smart_objects: Some(sos.clone()),
+                    });
+                },
 
-                    None => {
-                        #[cfg(feature = "logging")]
-                        log::debug!(
-                            "Ignored a Decision request for Entity {} - no SmartObjects available.", 
-                            local_entity,
-                        );
-                        failure_messages.write(NoDecisionMessage {
-                            entity: *local_entity,
-                            request_key: Some(msg.request_key.clone()),
-                            comment: Some("No SmartObjects available.")
-                        });
-                    }
+                None => {
+                    #[cfg(feature = "logging")]
+                    log::debug!(
+                        "Ignored a Decision request for Entity {} - no SmartObjects available.", 
+                        local_entity,
+                    );
+                    failure_messages.write(NoDecisionMessage {
+                        entity: Some(*local_entity),
+                        request_key: Some(msg.request_key.clone()),
+                        comment: Some("No SmartObjects available.\0")
+                    });
                 }
-            }
-        )
-        ;
+            };
+        });
     });
 }
 
@@ -432,21 +504,57 @@ pub fn decision_failed_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
     mut input_msgs: MessageReader<NoDecisionMessage>,
     mut message_queue: MessageWriter<QueuedApiOutMessage>,
 ) {
-    let messages = input_msgs.read().map(|msg| {
-        let host_mapped_agent_id = query
-            .get(msg.entity)
+    let messages = input_msgs.read().filter_map(|msg| {
+        let maybe_host_mapped_agent_id = msg.entity.map(|entity| {
+            query
+            .get(entity)
             .and_then(|comp| {
                 Ok(comp.host_id.clone())
-            }
-        ).unwrap();
+            })
+        });
 
-        QueuedApiOutMessage(
-            StagedApiOutMsg::NoActionChosen { 
-                host_agent_id: host_mapped_agent_id.into(), 
-                request_key: msg.request_key.unwrap_or_default(),
-                comment: msg.comment.map(|m| Arc::new(m.to_string())),
+        match maybe_host_mapped_agent_id {
+            None => {
+                #[cfg(feature = "logging")]
+                log::error!(
+                    "No known Entity for RequestKey {:?}; cannot send a valid NoActionChosen message!", 
+                    msg.request_key
+                );
+                None
             },
-        )
+            
+            Some(host_mapped_agent_id) => match host_mapped_agent_id {
+                Err(e) => {
+                    // This is an edge-case scenario, where either the Entity got despawned between operations, 
+                    // or where the HostMapped component got corrupted somehow (e.g. another command removed it).
+
+                    // TODO: Consider emitting an alternative message type for such cases to provide SOME feedback 
+                    //       to callers even in a weird scenario like this.
+
+                    #[cfg(feature = "logging")]
+                    log::error!(
+                        "Failed to resolve Entity {:?} to HostId for RequestKey {:?}; cannot send a valid NoActionChosen message! Error: {}", 
+                        msg.entity,
+                        msg.request_key,
+                        e
+                    );
+                    None
+                },
+
+                Ok(host_id) => {
+                    Some(
+                        QueuedApiOutMessage(
+                            StagedApiOutMsg::NoActionChosen { 
+                                host_agent_id: host_id.into(), 
+                                request_key: msg.request_key.unwrap_or_default(),
+                                comment: msg.comment.map(|m| Arc::new(m.to_string())),
+                            },
+                        )
+                    )
+                }
+            }
+            
+        }
     })
     ;
 

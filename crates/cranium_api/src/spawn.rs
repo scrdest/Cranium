@@ -136,7 +136,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                     err,
                 );
                 error_response_stream.write(HostSpawnResponseErrorMsg { 
-                    error: Arc::new(err.to_string()), 
+                    error: Arc::new(format!("{:?}\0", err).to_string()), 
                     host_id: request.host_id.clone(),
                     request_key: request.request_key.clone(),
                 });
@@ -152,7 +152,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                 #[cfg(feature = "logging")]
                 log::error!("Error deserializing Components from a Spawn API request (RqID: {}, HostId: {:?}): {:?}", request_id, request.host_id, e); 
                 error_response_stream.write(HostSpawnResponseErrorMsg { 
-                    error: Arc::new(e), 
+                    error: Arc::new(format!("{:?}\0", e)), 
                     host_id: request.host_id.clone(), 
                     request_key: request.request_key.clone(), 
                 });
@@ -221,7 +221,7 @@ pub fn process_remote_spawn_entity_request<I: HostIdType + 'static>(
                     }
                 }
                 error_response_stream.write(HostSpawnResponseErrorMsg { 
-                    error: Arc::new(e), 
+                    error: Arc::new(format!("{:?}\0", e)), 
                     host_id: request.host_id.clone(),
                     request_key: request.request_key.clone(),
                 });
@@ -342,7 +342,7 @@ pub(crate) fn host_entity_removal_request_processor<T: HostIdType + 'static> (
                 .or_else(|| {
                     err_writer.write(HostDespawnResponseErrorMsg { 
                         host_id: Some(msg.target_host_id.clone()), 
-                        error: Arc::new("Target entity does not exist!".to_string()), 
+                        error: Arc::new("Target entity does not exist!\0".to_string()), 
                         request_key: msg.request_key, 
                     });
                     None
@@ -449,7 +449,10 @@ pub(crate) fn forward_despawn_success_signals(
                 msg.request_key
             );
             #[cfg(feature = "logging")]
-            log::debug!("Queuing up a EntityDespawnSuccessful Message for output channel send: {:?}", out_msg);
+            {
+                log::info!("Successfully despawned Entity {:?} - {:?}", msg.entity, msg.comments);
+                log::debug!("Queuing up a EntityDespawnSuccessful Message for output channel send: {:?}", out_msg);
+            }
             QueuedApiOutMessage(out_msg)
         }
     );
@@ -459,10 +462,10 @@ pub(crate) fn forward_despawn_success_signals(
 
 /// Queues up error Spawn responses as messages to push out to the output channel.
 pub(crate) fn forward_despawn_error_signals(
-    mut success_messages: MessageReader<HostDespawnResponseErrorMsg<NativeHostIdType>>,
+    mut err_messages: MessageReader<HostDespawnResponseErrorMsg<NativeHostIdType>>,
     mut message_queue: MessageWriter<QueuedApiOutMessage>, 
 ) {
-    let transformed_msgs = success_messages
+    let transformed_msgs = err_messages
         .read()
         .map(|msg| {
             let out_msg = cranium_ffi::StagedApiOutMsg::EntityDespawnError(

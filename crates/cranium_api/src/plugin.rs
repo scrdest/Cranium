@@ -7,6 +7,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use core::marker::PhantomData;
 
 use cranium_core::bevy::platform::collections::HashMap;
+use cranium_core::bevy::platform::collections::HashSet;
 use cranium_core::bevy::prelude::*;
 use crossbeam_channel;
 use cranium_ffi::{ApiInMsg, StagedApiOutMsg, HostIdType, NativeHostIdType};
@@ -94,6 +95,13 @@ impl<I: HostIdType + 'static + Into<NativeHostIdType>> Plugin for ApiChannelsPlu
         };
         app.insert_resource(host_action_id_map);
 
+        // Stash for FFI-output Arc<String>s to avoid use-after-free by consumers or memleaking.
+        app.insert_resource(SentMessageStore { stash: HashMap::new(), insert_time: HashSet::new() });
+        
+        // Authomated cleanup for the FFI stash. 
+        // Cranium will not *guarantee* the FFI strings are valid past 1 hr from insertion.
+        app.add_systems(Last, stashed_message_housekeeping::<3600>);
+
         // Wire up the systems processing the channels.
         app.add_systems(PreUpdate, 
             (
@@ -106,7 +114,7 @@ impl<I: HostIdType + 'static + Into<NativeHostIdType>> Plugin for ApiChannelsPlu
 
         app.add_systems(Last, (
                 check_output_channel_for_clogs,
-                process_queued_output_messages::<1>,
+                process_queued_output_messages::<10>,
             ).chain()
         );
 

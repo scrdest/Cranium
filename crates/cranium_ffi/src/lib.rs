@@ -12,7 +12,9 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 #![no_std]
 
 mod types;
+pub mod ffi_trait;
 pub(crate) mod host_id;
 
 pub use types::*;
+pub use ffi_trait::*;
 pub use host_id::{HostIdType, TrivialHostIdType, NativeHostIdType, HostMapped};
