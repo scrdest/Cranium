@@ -64,6 +64,10 @@ unsafe extern "C" {
     safe fn cranium_request_despawn_u32(host_id: u32, request_key: RequestKey);
     safe fn cranium_request_despawn_i64(host_id: i64, request_key: RequestKey);
     safe fn cranium_request_despawn_i32(host_id: i32, request_key: RequestKey);
+    safe fn cranium_request_despawn_batch_u64(batch: cranium_ffi::FFIDespawnRequestBatch<u64>, request_key: RequestKey);
+    safe fn cranium_request_despawn_batch_u32(batch: cranium_ffi::FFIDespawnRequestBatch<u32>, request_key: RequestKey);
+    safe fn cranium_request_despawn_batch_i64(batch: cranium_ffi::FFIDespawnRequestBatch<i64>, request_key: RequestKey);
+    safe fn cranium_request_despawn_batch_i32(batch: cranium_ffi::FFIDespawnRequestBatch<u32>, request_key: RequestKey);
     safe fn cranium_request_decision_u64(host_id: u64, request_key: RequestKey);
     safe fn cranium_request_decision_u32(host_id: u32, request_key: RequestKey);
     safe fn cranium_request_decision_i64(host_id: i64, request_key: RequestKey);

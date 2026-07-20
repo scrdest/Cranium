@@ -36,7 +36,7 @@ cranium-api = {version = "0.3.0", path = "crates/cranium_api", optional = false}
 cranium-ffi = {version = "0.3.0", path = "crates/cranium_ffi", optional = false}
 
 [features]
-default = ["logging", "std", "ai_server", "debug"]
+default = ["logging", "std", "ai_server", "debug", "register_common_types"]
 
 bevy_dynamic_linking = ["cranium-core/bevy_dynamic_linking"]
 
@@ -111,6 +111,10 @@ ron_support = [
 
 postcard_support = [
     "cranium-actionset-loader?/postcard_support"
+]
+
+register_common_types = [
+  "cranium-api?/register_common_types"
 ]
 
 all = [

@@ -248,7 +248,7 @@ pub fn stashed_message_housekeeping<const MAX_STRING_AGE_SECONDS: u64>(
     let now = time.elapsed_wrapped().as_secs();
 
     let removes: Vec<(u64, u64)> = string_stash.insert_time.iter().filter_map(|(ins_time, key)| {
-        let delta = (now - ins_time);
+        let delta = now - ins_time;
         match delta > MAX_STRING_AGE_SECONDS {
             true => Some((ins_time.clone(), key.clone())),
             false => None,

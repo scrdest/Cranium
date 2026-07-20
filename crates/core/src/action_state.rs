@@ -137,9 +137,11 @@ pub fn action_state_update_handler(
                 bevy::log::debug!("{:?}: ActionTracker does not exist: {:?}", &msg.action, err);
                 match commands.get_entity(msg.entity) {
                     Err(err) => {
+                        #[cfg(feature = "logging")]
                         bevy::log::error!("{:?}: AI {:?} does not exist??? - {:?}", &msg.action, msg.entity, err);
                     }
                     Ok(mut cmds) => {
+                        #[cfg(feature = "logging")]
                         bevy::log::debug!("{:?}: Inserting new ActionState for AI {:?} - {:?}", &msg.action, msg.entity, &msg.to_state);
                         cmds.trigger(|ent| AiActionStateChange {
                             action: msg.action.clone(),
@@ -152,6 +154,7 @@ pub fn action_state_update_handler(
                 }
             }
             Ok(mut state) => { 
+                #[cfg(feature = "logging")]
                 bevy::log::debug!("example_action for AI {:?}: Updating the state to new value {:?}", msg.entity, msg.to_state);
                 let current = state.get_state().clone();
                 commands.trigger(AiActionStateChange {

@@ -166,7 +166,7 @@ impl<I: HostIdType + 'static + Into<NativeHostIdType>> Plugin for ApiChannelsPlu
         app.add_observer(decision_output_handler::<I>);
 
         // Add common type registrations
-        // TODO: Consider making this opt-in only.
+        #[cfg(feature = "register_common_types")]
         app.add_plugins(crate::type_registrations::CraniumApiTypesRegistrationPlugin);
     }
 }

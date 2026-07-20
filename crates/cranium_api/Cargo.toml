@@ -34,6 +34,8 @@ nostd_support = []
 
 web = []
 
+register_common_types = []
+
 logging = ["cranium-core/logging"]
 
 # Enable a small amount of optimization in the dev profile.

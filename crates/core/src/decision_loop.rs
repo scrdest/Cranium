@@ -92,6 +92,7 @@ pub fn prepare_ai(
     should_reinit_cons_queries: Option<ResMut<ShouldReinitConsiderationQueries>>,
     mut commands: Commands,
 ) {
+    #[cfg(feature = "logging")]
     bevy::log::debug!(
         "AiDecisionRequested Event fired, preparing AI for Entity {} (Request: {:?})", 
         event.entity,
@@ -176,6 +177,7 @@ pub fn decision_engine(
     no_match_strategy_config: Option<Res<NoCurveMatchStrategyConfig>>,
     mut commands: Commands,
 ) {
+    #[cfg(feature = "logging")]
     bevy::log::debug!(
         "AiDecisionInitiated Event fired, running Decision Engine for Entity {} (Request: {:?})", 
         event.entity,
@@ -612,6 +614,7 @@ pub fn decision_engine(
 
                         let true_span = true_max - true_min;
                         if true_span == 0. {
+                            #[cfg(feature = "logging")]
                             bevy::log::warn!(
                                 "Min/Max values for Consideration {:?} in Action {:?} 
                                 are both zero! min={:?}, max={:?}. 
