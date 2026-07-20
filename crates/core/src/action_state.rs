@@ -134,6 +134,7 @@ pub fn action_state_update_handler(
 
         match maybe_tracker_state {
             Err(err) => {
+                #[cfg(feature = "logging")]
                 bevy::log::debug!("{:?}: ActionTracker does not exist: {:?}", &msg.action, err);
                 match commands.get_entity(msg.entity) {
                     Err(err) => {
