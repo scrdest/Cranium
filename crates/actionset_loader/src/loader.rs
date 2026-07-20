@@ -196,17 +196,17 @@ impl<B: ActionSetLoaderBackend> AssetLoader for ActionSetLoader<B> {
         _ctx: &mut LoadContext<'_>
     ) -> Result<Self::Asset, Self::Error> {
         #[cfg(feature = "logging")]
-        bevy::log::debug!("ActionSetLoader running...");
+        cranium_core::bevy::log::debug!("ActionSetLoader running...");
         let mut bytes = cranium_core::types::CraniumList::new();
         let _ = reader.read_to_end(&mut bytes).await;
         let read = Self::from_slice(&bytes);
         let res: Result<ActionSet, Box<dyn core::error::Error + Send + Sync + 'static>> = read.map_err(|err| { 
             #[cfg(feature = "logging")]
-            bevy::log::error!("ActionSetLoader error: {:?}", err); 
+            cranium_core::bevy::log::error!("ActionSetLoader error: {:?}", err); 
             err.into() 
         } );
         #[cfg(feature = "logging")]
-        bevy::log::debug!("ActionSetLoader finished...");
+        cranium_core::bevy::log::debug!("ActionSetLoader finished...");
         res
     }
 
@@ -256,7 +256,7 @@ fn load_asset(
 ) {
     let asset_path = event.event().filename.to_owned();
     #[cfg(feature = "logging")]
-    bevy::log::info!("Reading ActionSet from {}...", &asset_path);
+    cranium_core::bevy::log::info!("Reading ActionSet from {}...", &asset_path);
     let handle: Handle<ActionSet> = asset_server.load(asset_path.to_owned());
     handles.0.entry(asset_path.to_owned()).or_insert(handle);
     timer.0.insert(asset_path.to_owned(), Timer::new(Duration::from_secs(2), TimerMode::Once));
@@ -280,7 +280,7 @@ fn countdown(
             match asset {
                 Some(_loaded_data) => {
                     #[cfg(feature = "logging")]
-                    bevy::log::info!("Successfully loaded ActionSet from file {:?}...", key);
+                    cranium_core::bevy::log::info!("Successfully loaded ActionSet from file {:?}...", key);
                     let notification = ActionSetLoaded {
                         filename: key.to_owned(),
                         asset_handle: handle.unwrap().to_owned(),
@@ -290,7 +290,7 @@ fn countdown(
                 None => {
                     let elapsed_time = timer.elapsed_secs();
                     #[cfg(feature = "logging")]
-                    bevy::log::warn!(
+                    cranium_core::bevy::log::warn!(
                         "Loading ActionSet data from file {:?} timed out after {:?}s!", 
                         key, elapsed_time
                     );
@@ -366,7 +366,7 @@ mod tests {
     ) {
         let _evt = trigger.event();
         #[cfg(feature = "logging")]
-        bevy::log::info!("ActionSet loaded successfully from {:?} as {:?}", _evt.filename, _evt.asset_handle);
+        cranium_core::bevy::log::info!("ActionSet loaded successfully from {:?} as {:?}", _evt.filename, _evt.asset_handle);
         exit.write(AppExit::Success);
     }
 
@@ -376,7 +376,7 @@ mod tests {
     ) {
         let _evt = trigger.event();
         #[cfg(feature = "logging")]
-        bevy::log::error!("ActionSet loading from {:?} timed out after {:?}s", _evt.filename, _evt.timeout_time);
+        cranium_core::bevy::log::error!("ActionSet loading from {:?} timed out after {:?}s", _evt.filename, _evt.timeout_time);
         assert!(false);
         exit.write(AppExit::Success);
     }
@@ -397,8 +397,8 @@ mod tests {
         .add_plugins((
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(200))),
             #[cfg(feature = "logging")]
-            bevy::log::LogPlugin { 
-                level: bevy::log::Level::DEBUG, 
+            cranium_core::bevy::log::LogPlugin { 
+                level: cranium_core::bevy::log::Level::DEBUG, 
                 custom_layer: |_| None, 
                 filter: "wgpu=error,bevy_render=info,bevy_ecs=info".to_string(),
                 fmt_layer: |_| None,
