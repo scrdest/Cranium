@@ -30,7 +30,7 @@ type ThreadSafeRefValue<T> = Arc<T>;
 /// Any abstracted weakrefs used by the library will be provided separately, if at all.
 #[derive(Debug, Hash, Default, bevy::reflect::Reflect)]
 pub struct ThreadSafeRef<T: ?Sized> {
-    wrapped: ThreadSafeRefValue<T>
+    pub(crate) wrapped: ThreadSafeRefValue<T>
 }
 
 impl<T> ThreadSafeRef<T> {

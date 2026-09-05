@@ -255,9 +255,9 @@ impl ActionTrackerSpawnConfigBuilder {
 }
 
 
-impl Into<ActionTrackerSpawnConfig> for ActionTrackerSpawnConfigBuilder {
-    fn into(self) -> ActionTrackerSpawnConfig {
-        self.build()
+impl From<ActionTrackerSpawnConfig> for ActionTrackerSpawnConfigBuilder {
+    fn from(value: ActionTrackerSpawnConfig) -> Self {
+        Self::from_reference_config(&value)
     }
 }
 

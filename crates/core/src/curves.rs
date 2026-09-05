@@ -956,11 +956,11 @@ pub fn resolve_curve_from_name<S: core::borrow::Borrow<str>>(curve_name: S) -> O
         "ConstMax" => Some(SupportedUtilityCurve::ConstMax(CURVE_CONST_MAX)),
         "ConstHalf" => Some(SupportedUtilityCurve::ConstHalf(CURVE_CONST_HALF)),
         "AtLeast" => Some(SupportedUtilityCurve::AtLeast(CURVE_ATLEAST)),
-        "LessThan" => Some(SupportedUtilityCurve::AtLeast(CURVE_LESSTHAN)),
+        "LessThan" => Some(SupportedUtilityCurve::LessThan(CURVE_LESSTHAN)),
         "Equals" => Some(SupportedUtilityCurve::Equals(
             UtilityCurveSampler::new_forward(UtilityBinaryCurve::new().halfway_mirror())
         )),
-        "NotEquals" => Some(SupportedUtilityCurve::Equals(
+        "NotEquals" => Some(SupportedUtilityCurve::NotEquals(
             UtilityCurveSampler::new_inverse(UtilityBinaryCurve::new().halfway_mirror())
         )),
         "Linear" => Some(SupportedUtilityCurve::Linear(CURVE_LINEAR)),
@@ -984,7 +984,7 @@ pub fn resolve_curve_from_name<S: core::borrow::Borrow<str>>(curve_name: S) -> O
         "QuadGauss" => Some(SupportedUtilityCurve::QuadraticQuasiGauss(
             UtilityCurveSampler::new_forward((QuadraticInOutCurve {}).halfway_mirror())
         )),
-        "AntiQuadGauss" => Some(SupportedUtilityCurve::QuadraticQuasiGauss(
+        "AntiQuadGauss" => Some(SupportedUtilityCurve::AntiQuadraticQuasiGauss(
             UtilityCurveSampler::new_inverse((QuadraticInOutCurve {}).halfway_mirror())
         )),
         _ => None,
@@ -1051,8 +1051,23 @@ impl AcceptsCurveRegistrations for bevy::prelude::World {
         curve: U, 
         key: IS,
     ) -> &mut Self {
+        let str_key = key.into();
+
+        // Do not allow custom keys to shadow builtins! 
+        // We should be using namespaces for user keys, so it shouldn't be a big risk long-term, 
+        // but short-term we may not have proper namespacing discipline in place so it's worth 
+        // being a bit defensive in just in case.
+        let is_static = resolve_curve_from_name(str_key.as_str()).is_some();
+        if is_static {
+            #[cfg(feature = "logging")]
+            bevy::log::warn!(
+                "Curve key {str_key:?} is reserved for static builtins - ignoring the registration!",
+            );
+            return self;
+        }
+
         let mut registry = self.get_resource_or_init::<UtilityCurveRegistry>();
-        let curve_key = crate::types::UtilityCurveKey::from(key.into());
+        let curve_key = crate::types::UtilityCurveKey::from(str_key);
         
         let old = registry.mapping.insert(
             curve_key.to_owned(), 

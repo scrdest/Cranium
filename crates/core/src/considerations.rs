@@ -11,7 +11,7 @@ use bevy::platform::prelude::{String, ToOwned};
 use bevy::prelude::*;
 use bevy::platform::sync::Arc;
 
-use crate::types::{self, ActionContextRef, AiEntity, CraniumKvMap, CraniumRwLock, PawnEntityRef};
+use crate::types::{self, ActionContextRef, ActionScore, AiEntity, CraniumKvMap, CraniumRwLock, PawnEntityRef};
 use crate::identifiers::{ConsiderationIdentifier, CurveIdentifier};
 
 #[cfg(any(feature = "actionset_loader"))]
@@ -74,7 +74,7 @@ pub type ConsiderationInputs = bevy::prelude::In<(
 )>;
 
 /// Convenience type-alias for the output type a Consideration must return.
-pub type ConsiderationOutputs = Option<f32>;
+pub type ConsiderationOutputs = Option<ActionScore>;
 
 
 /// A specialization of Bevy's `System` trait (or more precisely, `ReadOnlySystem`) 

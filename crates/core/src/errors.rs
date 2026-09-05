@@ -22,9 +22,9 @@ impl<F: Send + Sync + Fn(&String) -> crate::curves::SupportedUtilityCurve> Curve
 /// A config value indicating how the library code should handle Curve keys that 
 /// do not correspond to any known value (dynamically registered or hardcoded). 
 /// 
-/// By default the AI code will panic to avoid either running Actions in unexpected 
-/// and potentially harmful ways or silently skipping bad inputs, but users may 
-/// opt-in into alternative behaviors (skip/default) at their own responsibility.
+/// By default the AI code will skip bad Curves and log the error to avoid panicking
+/// in library code, but users may opt-in into alternative behaviors (panic/default, 
+/// disable logging for any of these) at their own responsibility.
 #[derive(Default, Clone)]
 pub enum NoCurveMatchStrategy {
     #[default]

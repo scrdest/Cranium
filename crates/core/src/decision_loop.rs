@@ -269,7 +269,6 @@ pub fn decision_engine(
         acts.actions
         .iter()
         .cloned()
-        .map(|act| ThreadSafeRef::new(act))
     });
 
     #[cfg(feature = "logging")]
@@ -571,28 +570,36 @@ pub fn decision_engine(
                                 curr_score = types::MIN_CONSIDERATION_SCORE;
                                 break;
                             },
-                            Ok(maybe_val) => match maybe_val {
-                                Some(val) => val,
-                                None => {
-                                    // A None return value signifies something went wrong, but it's not worth crashing over. 
-                                    // 
-                                    // Usually, this is an issue with either the Context or the Pawn not satisfying the Consideration 
-                                    // invariants (for example, a Consideration requires a Pawn, but it is null, or the Contexts should 
-                                    // all have SomeRandomComponent but the ContextFetcher returned one without it somehow).
-                                    //
-                                    // This is distinct from returning zero, as zero 
-                                    #[cfg(feature = "logging")]
-                                    bevy::log::info!(
-                                        "decision_engine: AI {:?} - Consideration '{:}' returned a None score, indicating a nonfatal error. Defaulting to zero score.", 
-                                        &audience, 
-                                        &cons.consideration_name, 
-                                    );
-                                    curr_score = types::MIN_CONSIDERATION_SCORE;
-                                    skip_this_context = true; 
-                                    break;
-                                }
-                            }
+                            Ok(maybe_val) => maybe_val.unwrap_or_else(|| {
+                                // A None return value signifies something went wrong, but it's not worth crashing over. 
+                                // 
+                                // Usually, this is an issue with either the Context or the Pawn not satisfying the Consideration 
+                                // invariants (for example, a Consideration requires a Pawn, but it is null, or the Contexts should 
+                                // all have SomeRandomComponent but the ContextFetcher returned one without it somehow).
+                                #[cfg(feature = "logging")]
+                                bevy::log::info!(
+                                    "decision_engine: AI {:?} - Consideration '{:}' returned a None score, indicating a nonfatal error. Defaulting to zero score.", 
+                                    &audience, 
+                                    &cons.consideration_name, 
+                                );
+                                types::MIN_CONSIDERATION_SCORE
+                            })
                         };
+                        
+                        if raw_score <= types::MIN_CONSIDERATION_SCORE {
+                            // A zero score is valid, but we already know this Context is a lost cause.
+                            // This may arise either from a 'normal' zero or a None due to error; 
+                            // either way, we handle it the same - this Context is not valid, skip.
+                            #[cfg(feature = "logging")]
+                            bevy::log::info!(
+                                "decision_engine: AI {:?} - Consideration '{:}' score is zero, skipping further eval.", 
+                                &audience, 
+                                &cons.consideration_name, 
+                            );
+                            curr_score = types::MIN_CONSIDERATION_SCORE;
+                            skip_this_context = true; 
+                            break
+                        }
 
                         let (true_min, true_max) = match cons.min <= cons.max {
                             true => (cons.min, cons.max),
@@ -616,11 +623,11 @@ pub fn decision_engine(
                         if true_span == 0. {
                             #[cfg(feature = "logging")]
                             bevy::log::warn!(
-                                "Min/Max values for Consideration {:?} in Action {:?} 
-                                are both zero! min={:?}, max={:?}. 
+                                "Span of Min/Max values for Consideration {:?} 
+                                in Action {:?} is zero! min={:?}, max={:?}. 
                                 This would result in a division-by-zero and will instead be  
                                 interpreted as a disabled Consideration and ignored. If you did not  
-                                expect both values to be zero, you should investigate the Action spec.",
+                                expect both values to be equal, you should investigate the Action spec.",
                                 cons.consideration_name,
                                 &action_template.name,
                                 cons.min,
@@ -658,6 +665,19 @@ pub fn decision_engine(
                             score,
                             curr_score,
                         );
+
+                        if curr_score < types::MIN_CONSIDERATION_SCORE {
+                            #[cfg(feature = "logging")]
+                            bevy::log::debug!(
+                                "decision_engine: AI {:?} - Consideration '{:}' for Action {:?} - curr_score {:?} is below the minimum acceptable value of {}, discarding the Context.",
+                                audience,
+                                cons.consideration_name,
+                                &action_template.name,
+                                curr_score,
+                                types::MIN_CONSIDERATION_SCORE,
+                            );
+                            skip_this_context = true; break;
+                        }
 
                         // There is a superior Context for this ActionTemplate.
                         // We don't need to bother checking other Considerations for this Context, 

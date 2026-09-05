@@ -208,10 +208,10 @@ fn setup_example_entity(
         )
     ];
 
-    let example_actionset = ActionSet {
-        name: "ExampleActionSet".to_string(),
-        actions: cranium::types::CraniumList::from(example_actions)
-    };
+    let example_actionset = ActionSet::new_raw(
+        "ExampleActionSet", 
+        cranium::types::CraniumList::from(example_actions)
+    );
 
     actionset_store.map_by_name.insert(example_actionset.name.to_owned(), example_actionset);
 

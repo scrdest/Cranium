@@ -120,7 +120,7 @@ impl ActionTemplate {
     /// Checks if this template should be processed at a given LOD.
     pub fn is_within_lod_range(&self, lod: &Option<crate::lods::AILevelOfDetailValue>) -> bool {
         let qry_lod = lod.map(|lv| lv.to_primitive()).unwrap_or(crate::lods::LOD_NORMAL);
-        let min = self.lod_min.unwrap_or(crate::lods::LOD_NORMAL);
+        let min = self.lod_min.unwrap_or(crate::lods::LOD_ELEVATED);
         let max = self.lod_max.unwrap_or(crate::lods::LOD_MINIMAL);
         qry_lod >= min && qry_lod <= max
     }
