@@ -74,7 +74,6 @@ impl PartialEq for EntityIdentifier {
             (Self::EntityAndName(l0, _), Self::EntityAndName(r0, _)) => l0 == r0,
             (Self::Entity(l0), Self::EntityAndName(r0, _)) => l0 == r0,
             (Self::EntityAndName(l0, _), Self::Entity(r0)) => l0 == r0,
-            _ => false,
         }
     }
 }

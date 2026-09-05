@@ -20,7 +20,7 @@ use crate::events::{AiActionPicked, AiDecisionInitiated, AiDecisionRequested, No
 use crate::lods::{AILevelOfDetail};
 use crate::pawn::Pawn;
 use crate::smart_object::ActionSetStore;
-use crate::types::{self, ActionContextRef, ActionScore, ActionTemplateRef, ThreadSafeRef};
+use crate::types::{self, ActionContextRef, ActionScore, ActionTemplateRef};
 
 /// Correction formula as per the GDC 2015 "Building a Better Centaur AI" 
 /// presentation by Dave Mark and Mike Lewis.
