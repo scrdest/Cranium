@@ -25,7 +25,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 //! special situations (e.g. a boss NPC during a bossfight scene vs normal wandering around nearby).
 //! 
 //! In practice, this is implemented as a simple value and a pair of attributes on the ActionTemplate, 
-//! `min_lod` and `max_lod`. A Template is skipped if its AI's current LOD is not between those two values.
+//! `lod_min` and `lod_max`. A Template is skipped if its AI's current LOD is not between those two values.
 //! 
 //! The exact logic of the LOD-setting systems are left up to the user; the library provides the levels 
 //! and an integration of the LODs into the core Utility AI engine, since user code cannot hook into it. 

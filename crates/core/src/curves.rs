@@ -672,7 +672,7 @@ pub enum SupportedUtilityCurve {
     /// 
     /// Use sparingly; it's included for completeness, but seeing it in production code 
     /// is most likely an AI design smell - your ContextFetchers might need improving instead.
-    Equals(UtilityCurveSampler<HalfwayMirrorCurve<UtilityBinaryCurve>>),
+    Equals(UtilityCurveSampler<UtilityBinaryCurve>),
 
     /// A Curve that essentially acts as an if-statement: `t != 1.0` where `t` is normalized input.
     /// 
@@ -686,7 +686,7 @@ pub enum SupportedUtilityCurve {
     /// 
     /// Use sparingly; it's included for completeness, but seeing it in production code 
     /// is most likely an AI design smell - your ContextFetchers might need improving instead.
-    NotEquals(UtilityCurveSampler<HalfwayMirrorCurve<UtilityBinaryCurve>>),
+    NotEquals(UtilityCurveSampler<UtilityBinaryCurve>),
 
     /// A monotonically increasing 'high-pass' Curve where t<=min returns 0.0, 
     /// t>=max returns 1.0, and every value in between is LERPed. 
@@ -958,10 +958,10 @@ pub fn resolve_curve_from_name<S: core::borrow::Borrow<str>>(curve_name: S) -> O
         "AtLeast" => Some(SupportedUtilityCurve::AtLeast(CURVE_ATLEAST)),
         "LessThan" => Some(SupportedUtilityCurve::LessThan(CURVE_LESSTHAN)),
         "Equals" => Some(SupportedUtilityCurve::Equals(
-            UtilityCurveSampler::new_forward(UtilityBinaryCurve::new().halfway_mirror())
+            UtilityCurveSampler::new_forward(UtilityBinaryCurve::new())
         )),
         "NotEquals" => Some(SupportedUtilityCurve::NotEquals(
-            UtilityCurveSampler::new_inverse(UtilityBinaryCurve::new().halfway_mirror())
+            UtilityCurveSampler::new_inverse(UtilityBinaryCurve::new())
         )),
         "Linear" => Some(SupportedUtilityCurve::Linear(CURVE_LINEAR)),
         "AntiLinear" => Some(SupportedUtilityCurve::AntiLinear(CURVE_ANTILINEAR)),
