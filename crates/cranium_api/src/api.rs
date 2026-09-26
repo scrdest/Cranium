@@ -30,7 +30,7 @@ pub fn request_heartbeat() {
 
 pub fn create_app() -> App {
     let mut app = App::new();
-    app.add_plugins(CraniumPlugin);
+    app.add_plugins(CraniumPlugin::default());
 
     #[cfg(feature = "logging")]
     let log_level = option_env!("CRANIUM_LOG_LEVEL")

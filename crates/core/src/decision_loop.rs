@@ -12,15 +12,32 @@ use bevy::prelude::*;
 
 use crate::actions;
 use crate::ai::{AIController};
-use crate::context_fetchers::{ContextFetcherKeyToSystemMap, ShouldReinitCfQueries};
-use crate::considerations::{ConsiderationKeyToSystemMap, ShouldReinitConsiderationQueries};
+use crate::context_fetchers::{ContextFetcherKeyToSystemMap};
+use crate::considerations::{ConsiderationKeyToSystemMap};
 use crate::curves::{SupportedUtilityCurve, UtilityCurve, UtilityCurveRegistry, resolve_curve_from_name};
 use crate::errors::NoCurveMatchStrategyConfig;
-use crate::events::{AiActionPicked, AiDecisionInitiated, AiDecisionRequested, NoDecisionMessage, SomeAiDecisionProcessed};
+use crate::events::{AiActionPickedEvent, AiActionPickedMessage, AiActionPickedPayload, AiDecisionInitiated, AiDecisionRequested, NoDecisionMessage, SomeAiDecisionProcessed};
 use crate::lods::{AILevelOfDetail};
 use crate::pawn::Pawn;
 use crate::smart_object::ActionSetStore;
 use crate::types::{self, ActionContextRef, ActionScore, ActionTemplateRef};
+
+
+/// Runtime configuration for how the Decision Engine behaves.
+#[derive(Resource, Debug, Clone)]
+pub struct DecisionEngineConfig {
+    write_picked_message: bool,
+    emit_picked_event: bool,
+}
+
+impl Default for DecisionEngineConfig {
+    fn default() -> Self {
+        Self {
+            write_picked_message: true,
+            emit_picked_event: true,
+        }
+    }
+}
 
 /// Correction formula as per the GDC 2015 "Building a Better Centaur AI" 
 /// presentation by Dave Mark and Mike Lewis.
@@ -88,8 +105,6 @@ fn consideration_adjustment(
 /// A helper Observer that handles the setup for a Decision.
 pub fn prepare_ai(
     event: On<AiDecisionRequested>,
-    should_reinit_cf_queries: Option<ResMut<ShouldReinitCfQueries>>,
-    should_reinit_cons_queries: Option<ResMut<ShouldReinitConsiderationQueries>>,
     mut commands: Commands,
 ) {
     #[cfg(feature = "logging")]
@@ -98,37 +113,11 @@ pub fn prepare_ai(
         event.entity,
         event.request_key,
     );
-
-    should_reinit_cf_queries.map(|mut res| {
-        res.set(true);
-    });
-
-    should_reinit_cons_queries.map(|mut res| {
-        res.set(true);
-    });
     
     commands.trigger(AiDecisionInitiated {
         entity: event.entity,
         request_key: event.request_key.clone(),
         smart_objects: event.smart_objects.clone(),
-    });
-}
-
-pub fn disable_cf_reinit(
-    _event: On<crate::events::SomeAiDecisionProcessed>,
-    should_reinit_cf_queries: Option<ResMut<ShouldReinitCfQueries>>,
-) {
-    should_reinit_cf_queries.map(|mut res| {
-        res.set(false);
-    });
-}
-
-pub fn disable_consideration_reinit(
-    _event: On<crate::events::SomeAiDecisionProcessed>,
-    should_reinit_cons_queries: Option<ResMut<ShouldReinitConsiderationQueries>>,
-) {
-    should_reinit_cons_queries.map(|mut res| {
-        res.set(false);
     });
 }
 
@@ -170,6 +159,7 @@ pub fn decision_engine(
     actionset_store: Res<ActionSetStore>,
     context_fetcher_system_map: Res<ContextFetcherKeyToSystemMap>,
     consideration_system_map: Res<ConsiderationKeyToSystemMap>,
+    decision_engine_config: Res<DecisionEngineConfig>,
     entity_checker: Query<Entity, With<AIController>>, 
     lod_query: Query<Option<&AILevelOfDetail>>, 
     pawn_query: Query<Option<&Pawn>>,
@@ -261,7 +251,13 @@ pub fn decision_engine(
 
     let available_actions = smartobjects.actionset_refs.iter().filter_map(
         |actionset_key| {
-            let maybe_act = actionset_store.map_by_name.get(actionset_key);
+            let maybe_act = actionset_store.map_by_name.get(
+                // This is a bit funny - we're double as-ref-ing to convert the Cranium 
+                // type to a standard Arc<T>, then again to convert the Arc<T> to &T.
+                actionset_key
+                .as_ref()
+                .as_ref()
+            );
             maybe_act
         }
     )
@@ -797,8 +793,7 @@ pub fn decision_engine(
                 &best_score,
             );
 
-            let pick_evt = AiActionPicked {
-                entity: audience.entity(),
+            let payload = AiActionPickedPayload {
                 action_key: best_template.action_key.to_owned(),
                 action_name: best_template.name.to_owned(),
                 action_context: best_context.to_owned(),
@@ -806,17 +801,38 @@ pub fn decision_engine(
                 request_key: event.request_key
             };
 
-            commands.trigger(pick_evt);
+            if decision_engine_config.emit_picked_event {
+                let pick_evt = AiActionPickedEvent {
+                    entity: audience.entity(),
+                    payload: payload.clone(),
+                };
+
+                commands.trigger(pick_evt);
+            }
+
+            if decision_engine_config.write_picked_message {
+                let pick_msg = AiActionPickedMessage {
+                    entity: audience.entity(),
+                    payload: payload.clone(),
+                };
+
+                commands.write_message(pick_msg);
+            }
         }
     }
 }
 
-pub fn trigger_dispatch_to_user_actions(
-    trigger: On<crate::events::AiActionPicked>,
+/// An Observer system that turns AiActionPickedEvents into user code dispatches.
+/// 
+/// This and `trigger_dispatch_to_user_actions_messagebased` are two different impls 
+/// for the same core purpose, triggering the dispatch machinery (running on its own schedule).
+pub fn trigger_dispatch_to_user_actions_eventbased(
+    trigger: On<crate::events::AiActionPickedEvent>,
     mut writer: MessageWriter<crate::events::AiActionDispatchToUserCode>,
 ) {
     let event = trigger.event();
-    let action_key = &event.action_key;
+    let action_key = &event.payload.action_key;
+
     #[cfg(feature = "logging")]
     bevy::log::debug!(
         "dispatch_to_user_actions - Running for Action {:?} for Pick Event {:?}",
@@ -826,11 +842,44 @@ pub fn trigger_dispatch_to_user_actions(
     let message = crate::events::AiActionDispatchToUserCode::new(
         event.entity, 
         action_key.to_owned(), 
-        event.action_name.to_owned(), 
-        event.action_context, 
-        event.action_score
+        event.payload.action_name.to_owned(), 
+        event.payload.action_context, 
+        event.payload.action_score
     );
+
     writer.write(message);
+}
+
+/// A Message-processing system that turns AiActionPickedMessages into user code dispatches.
+/// 
+/// This and `trigger_dispatch_to_user_actions_eventbased` are two different impls 
+/// for the same core purpose, triggering the dispatch machinery (running on its own schedule).
+/// 
+/// This is a pretty thin translation layer between two Messages, mainly for the purpose of allowing 
+/// this bridge and the dispatch to live in well-defined stages of the overall schedule.
+pub fn trigger_dispatch_to_user_actions_messagebased(
+    mut reader: MessageReader<crate::events::AiActionPickedMessage>,
+    mut writer: MessageWriter<crate::events::AiActionDispatchToUserCode>,
+) {
+    for msg in reader.read() {
+        let action_key = &msg.payload.action_key;
+
+        #[cfg(feature = "logging")]
+        bevy::log::debug!(
+            "dispatch_to_user_actions - Running for Action {:?} for Pick msg {:?}",
+            action_key, msg
+        );
+
+        let message = crate::events::AiActionDispatchToUserCode::new(
+            msg.entity, 
+            action_key.to_owned(), 
+            msg.payload.action_name.to_owned(), 
+            msg.payload.action_context, 
+            msg.payload.action_score
+        );
+
+        writer.write(message);
+    }
 }
 
 pub fn handle_dispatch_to_user_actions(

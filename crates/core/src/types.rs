@@ -20,6 +20,10 @@ mod std_types {
     /// A standardized Cranium type for Read-Write Locks (i.e. std::sync::RwLock<T> or similar)
     pub type CraniumRwLock<T> = bevy::platform::sync::RwLock<T>;
 
+    /// A standardized Cranium type for Mutexes. Stuff like query reinit is guaranteed-singlethreded, 
+    /// which means that the RwLock is unnecessary overhead.
+    pub type CraniumMutex<T> = bevy::platform::sync::Mutex<T>;
+
     /// A standardized Cranium type for dynamic arrays (i.e. Vec<T> or equivalents)
     pub type CraniumList<T> = bevy::platform::prelude::Vec<T>;
 
@@ -32,6 +36,10 @@ mod nostd_types {
     //! std-free implementations 
     /// A standardized Cranium type for Read-Write Locks (i.e. std::sync::RwLock<T> or similar)
     pub type CraniumRwLock<T> = bevy::platform::sync::RwLock<T>;
+
+    /// A standardized Cranium type for Mutexes. Stuff like query reinit is guaranteed-singlethreded, 
+    /// which means that the RwLock is unnecessary overhead.
+    pub type CraniumMutex<T> = bevy::platform::sync::Mutex<T>;
 
     /// A standardized Cranium type for dynamic arrays (i.e. Vec<T> or equivalents)
     pub type CraniumList<T> = bevy::platform::prelude::Vec<T>;
@@ -87,7 +95,8 @@ pub use crate::considerations::IntoConsiderationSystem;
 
 pub type SmartObjects = crate::smart_object::SmartObjects;
 
-pub type ActionSetRef = String;
+pub type RawActionSetRef = String;
+pub type ActionSetRef = ThreadSafeRef<RawActionSetRef>;
 pub type ActionSetsRef = ThreadSafeRef<CraniumList<ActionSetRef>>;
 
 pub type EntityIdentifier = crate::entity_identifier::EntityIdentifier;

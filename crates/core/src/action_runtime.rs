@@ -500,23 +500,23 @@ impl UserDefaultActionTrackerSpawnConfig {
 
 /// A batteries-included solution for creating ActionTrackers for your Actions.
 /// 
-/// Event-driven; responds to AiActionPicked events
+/// Event-driven; responds to AiActionPickedEvent events
 pub fn create_tracker_for_picked_action(
-    trigger: On<crate::events::AiActionPicked>,
+    trigger: On<crate::events::AiActionPickedEvent>,
     mut commands: Commands,
     user_default_config_resource: Res<UserDefaultActionTrackerSpawnConfig>,
 ) {
     let event = trigger.event();
 
     let action = Action {
-        name: event.action_name.clone(),
-        action_key: event.action_key.clone(),
-        context: event.action_context.clone(),
+        name: event.payload.action_name.clone(),
+        action_key: event.payload.action_key.clone(),
+        context: event.payload.action_context.clone(),
     };
 
     let scored_action = ScoredAction {
         action: action,
-        score: event.action_score,
+        score: event.payload.action_score,
     };
 
     let user_config = user_default_config_resource.config.clone();

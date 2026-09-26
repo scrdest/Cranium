@@ -12,7 +12,7 @@ use cranium_core::bevy::{platform::sync::{OnceLock}};
 use cranium_core::bevy::log;
 use cranium_core::ai::AIController;
 use cranium_core::actions::ActionKey;
-use cranium_core::events::{AiActionPicked, AiDecisionRequested, NoDecisionMessage};
+use cranium_core::events::{AiActionPickedEvent, AiDecisionRequested, NoDecisionMessage};
 use cranium_core::smart_object::SmartObjects;
 use crossbeam_channel;
 use cranium_ffi::{ApiInMsg, EntityOperation, HostIdType, HostMapped, NativeHostIdType, RequestKey, StagedApiOutMsg};
@@ -297,7 +297,7 @@ pub struct EntityToHostIdRegistry<T: HostIdType>(pub(crate) HashMap<Entity, T>);
 
 /// A System that simply converts DecisionRequestedMsgs into Observer triggers 
 /// for processing Decisions for each AI (which ultimately get emitted back as
-/// AiActionPicked Events and turned into ApiOutMsg::ActionChosen Messages).
+/// AiActionPickedEvent Events and turned into ApiOutMsg::ActionChosen Messages).
 /// 
 /// Note that a request is NOT guaranteed to trigger an AI decision! 
 /// 
@@ -438,7 +438,7 @@ impl<I: HostIdType + 'static> HostActionIdMap<I> {
 }
 
 pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>> (
-    trigger: On<AiActionPicked>,
+    trigger: On<AiActionPickedEvent>,
     query: Query<&HostMapped<I>>,
     host_action_id_registry: Res<HostActionIdMap<I>>,
     mut message_queue: MessageWriter<QueuedApiOutMessage>,
@@ -449,7 +449,7 @@ pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
     }).map_err(|err| {
         #[cfg(feature = "logging")]
         log::error!(
-            "decision_output_handler - failed to locate a HostMapped component on the AiActionPicked Target {:?}.
+            "decision_output_handler - failed to locate a HostMapped component on the AiActionPickedEvent Target {:?}.
             Error: '{}'.  
             ActionChosen message will not be send due to invariant violation. ",
             tgt,
@@ -457,25 +457,25 @@ pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
         )
     });
 
-    let host_mapped_context = query.get(trigger.action_context).and_then(|comp| {
+    let host_mapped_context = query.get(trigger.payload.action_context).and_then(|comp| {
         Ok(comp.host_id.clone())
     }).map_err(|err| {
         #[cfg(feature = "logging")]
         log::error!(
-            "decision_output_handler - failed to locate a HostMapped component on the AiActionPicked Context {:?}. 
+            "decision_output_handler - failed to locate a HostMapped component on the AiActionPickedEvent Context {:?}. 
             Error: '{}'. 
             ActionChosen message will not be send due to invariant violation. ",
-            trigger.action_context,
+            trigger.payload.action_context,
             err, 
         )
     });
 
-    let host_mapped_action = host_action_id_registry.get_host_id(&trigger.action_key).or_else(|| {
+    let host_mapped_action = host_action_id_registry.get_host_id(&trigger.payload.action_key).or_else(|| {
         #[cfg(feature = "logging")]
         log::error!(
-            "decision_output_handler - failed to match a HostId for an AiActionPicked Action {:?}. 
+            "decision_output_handler - failed to match a HostId for an AiActionPickedEvent Action {:?}. 
             ActionChosen message will not be send due to invariant violation. ",
-            &trigger.action_key,
+            &trigger.payload.action_key,
         );
         None
     });
@@ -488,7 +488,7 @@ pub fn decision_output_handler<I: HostIdType + 'static + Into<NativeHostIdType>>
                         host_agent_id: agent_id.into(), 
                         host_action_id: action.as_ref().to_owned().into(), 
                         host_context_id: context.into(), 
-                        request_key: trigger.request_key.unwrap_or_default(),
+                        request_key: trigger.payload.request_key.unwrap_or_default(),
                     }
                 )
             );

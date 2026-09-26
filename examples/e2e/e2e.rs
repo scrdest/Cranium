@@ -217,7 +217,11 @@ fn setup_example_entity(
 
     let new_controller = AIController::default();
     let new_sos = SmartObjects {
-        actionset_refs: ThreadSafeRef::new(cranium::types::CraniumList::from(["ExampleActionSet".to_string()]))
+        actionset_refs: ThreadSafeRef::new(
+        cranium::types::CraniumList::from([
+                ThreadSafeRef::new("ExampleActionSet".to_string())
+            ])
+        )
     };
 
     let spawned = commands.spawn((
@@ -355,7 +359,7 @@ fn main() {
 
     app
     // Enables the main Cranium integration:
-    .add_plugins(CraniumPlugin)
+    .add_plugins(CraniumPlugin::default())
     
     // Configures the app to shut down once all Actions are finished at the end of a tick, plus logs and such:
     .add_plugins(CraniumTestPlugin)

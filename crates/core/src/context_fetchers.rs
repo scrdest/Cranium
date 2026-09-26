@@ -9,6 +9,8 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use bevy::prelude::*;
 use bevy::platform::prelude::{String, ToOwned};
 use bevy::platform::sync::Arc;
+use crate::reinit::{world_structure_changed, CraniumWorldStructureVersion};
+use crate::schedule;
 use crate::types::{self, ActionContext, AiEntity, CraniumKvMap, CraniumRwLock, PawnEntityRef};
 use crate::identifiers::ContextFetcherIdentifier;
 
@@ -90,7 +92,7 @@ pub struct ContextFetcherKeyToSystemMap {
     pub mapping: CraniumKvMap<
         types::ContextFetcherKey, 
         Arc<CraniumRwLock<dyn ContextFetcherSystem>>
-    >
+    >,
 }
 
 
@@ -164,71 +166,46 @@ impl AcceptsContextFetcherRegistrations for World {
     }
 }
 
-#[derive(Resource, Debug)]
-pub struct ShouldReinitCfQueries(bool);
-
-impl ShouldReinitCfQueries {
-    pub fn get(&self) -> bool {
-        self.0
-    }
-
-    pub fn set(&mut self, val: bool) {
-        self.0 = val;
-    }
-}
-
-impl Default for ShouldReinitCfQueries {
-    fn default() -> Self {
-        Self(true)
-    }
-}
-
 pub fn reinit_cf_queries(world: &mut World) {
-    let world_cell = world.as_unsafe_world_cell();
+    // Stamp first: if a refresh panics, we don't want to re-enter it forever.
+    let generation = world.archetypes().generation();
+    
+    match world.get_resource_mut::<CraniumWorldStructureVersion>() {
+        Some(mut v) => v.0 = generation,
+        None => {
+            let mut new_rsc = CraniumWorldStructureVersion::from_world(world);
+            new_rsc.0 = generation;
+            world.insert_resource(new_rsc);
+        }
+    }
 
-    // SAFETY: This is an Exclusive System, so we are the only one with World access.
-    //         We only really need this to bypass a silly borrow-check on the reference.
-    let should_reinit_res = unsafe {
-        world_cell.get_resource::<ShouldReinitCfQueries>()
-    };
+    // Clone handles out so no borrow of world-held resources is live during init.
+    let cfs: Vec<_> = world
+        .resource::<crate::context_fetchers::ContextFetcherKeyToSystemMap>()
+        .mapping
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+    ;
 
-    let should_reinit = match should_reinit_res {
-        None => true, 
-        Some(reinit_mark) => reinit_mark.get()
-    };
-
-    if !should_reinit { 
-        return 
-    };
+    let cell = world.as_unsafe_world_cell();
 
     // SAFETY: This is an Exclusive System, so we are the only one with World access, 
     //         and we are the only ones with a lock on the initialized System.
     //         We only really need this to bypass a silly borrow-check on the reference.
-    let registry = unsafe { 
-        world_cell.get_resource_mut::<ContextFetcherKeyToSystemMap>() 
-    };
+    unsafe {
+        for (key, sys) in cfs {
+            match sys.write() {
+                Ok(mut s) => { 
+                    s.initialize(cell.world_mut()); 
+                }
 
-    let mut registry = match registry {
-        None => return,
-        Some(r) => r,
-    };
-
-    registry.mapping.iter_mut().for_each(|(_key, system_lock)| {
-        let write_state = system_lock.write();
-        {
-            match write_state {
-                Ok(mut system) => {
-                    // SAFETY: This is an Exclusive System, so we are the only one with World access, 
-                    //         and we are the only ones with a lock on the initialized System.
-                    //         We only really need this to bypass a silly borrow-check on &muts.
-                    #[cfg(feature = "logging")]
-                    bevy::log::debug!("reinit_consideration_queries: Reinitializing System {:?}", _key);
-                    system.initialize(unsafe { world_cell.world_mut() });
-                },
-                Err(e) => panic!("{:?}", e)
+                Err(e) => { 
+                    bevy::log::error!("CF {:?} lock poisoned, skipping ({:?})", key, e); 
+                }
             }
         }
-    });
+    }
 }
 
 pub struct ContextFetcherPlugin;
@@ -236,12 +213,14 @@ pub struct ContextFetcherPlugin;
 impl Plugin for ContextFetcherPlugin {
     fn build(&self, app: &mut App) {
         app
-            // Technically unnecessary, but will give users saner error messages if we pre-initialize:
-            .init_resource::<ShouldReinitCfQueries>()
             .init_resource::<ContextFetcherKeyToSystemMap>()
-            .add_systems(Startup, reinit_cf_queries)
-            .add_systems(FixedFirst, reinit_cf_queries)
-            .add_observer(crate::decision_loop::disable_cf_reinit)
+            .add_systems(Startup, reinit_cf_queries.in_set(schedule::CraniumSet::AiInit))
+            .add_systems(
+                FixedUpdate, 
+                reinit_cf_queries
+                            .in_set(schedule::CraniumSet::Preflights)
+                            .run_if(world_structure_changed)
+            )
         ;
     }
 }

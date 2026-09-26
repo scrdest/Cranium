@@ -26,6 +26,8 @@ pub mod identifiers;
 pub mod lods;
 // pub mod memories;
 pub mod pawn;
+pub mod reinit;
+pub mod schedule;
 // pub mod senses;
 pub mod smart_object;
 mod thread_safe_wrapper;
