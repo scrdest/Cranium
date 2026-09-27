@@ -16,7 +16,7 @@ use crate::context_fetchers::{ContextFetcherKeyToSystemMap};
 use crate::considerations::{ConsiderationKeyToSystemMap};
 use crate::curves::{SupportedUtilityCurve, UtilityCurve, UtilityCurveRegistry, resolve_curve_from_name};
 use crate::errors::NoCurveMatchStrategyConfig;
-use crate::events::{AiActionPickedEvent, AiActionPickedMessage, AiActionPickedPayload, AiDecisionInitiated, AiDecisionRequested, NoDecisionMessage, SomeAiDecisionProcessed};
+use crate::events::{AiActionPickedEvent, AiActionPickedMessage, AiActionPickedPayload, AiDecisionRequestedMessage, NoDecisionMessage};
 use crate::lods::{AILevelOfDetail};
 use crate::pawn::Pawn;
 use crate::smart_object::ActionSetStore;
@@ -102,24 +102,6 @@ fn consideration_adjustment(
 }
 
 
-/// A helper Observer that handles the setup for a Decision.
-pub fn prepare_ai(
-    event: On<AiDecisionRequested>,
-    mut commands: Commands,
-) {
-    #[cfg(feature = "logging")]
-    bevy::log::debug!(
-        "AiDecisionRequested Event fired, preparing AI for Entity {} (Request: {:?})", 
-        event.entity,
-        event.request_key,
-    );
-    
-    commands.trigger(AiDecisionInitiated {
-        entity: event.entity,
-        request_key: event.request_key.clone(),
-        smart_objects: event.smart_objects.clone(),
-    });
-}
 
 
 /// Core AI decision loop. 
@@ -154,43 +136,77 @@ pub fn prepare_ai(
 /// using a couple of custom Resources provided by Cranium; see `app.register_consideration()`, 
 /// `app.register_context_fetcher()` and `app.register_utility_curve()` for API details.
 pub fn decision_engine(
-    event: On<AiDecisionInitiated>,
-    world_ref: &World, 
+    world_ref: &World,
+    mut requests: MessageReader<AiDecisionRequestedMessage>,
     actionset_store: Res<ActionSetStore>,
     context_fetcher_system_map: Res<ContextFetcherKeyToSystemMap>,
     consideration_system_map: Res<ConsiderationKeyToSystemMap>,
     decision_engine_config: Res<DecisionEngineConfig>,
-    entity_checker: Query<Entity, With<AIController>>, 
-    lod_query: Query<Option<&AILevelOfDetail>>, 
+    entity_checker: Query<Entity, With<AIController>>,
+    lod_query: Query<Option<&AILevelOfDetail>>,
     pawn_query: Query<Option<&Pawn>>,
     utility_curve_registry: Option<Res<UtilityCurveRegistry>>,
     no_match_strategy_config: Option<Res<NoCurveMatchStrategyConfig>>,
     mut commands: Commands,
 ) {
+    for request in requests.read() {
+        // Factored out the per-request logic to a separate function:
+        run_decision_for_request(
+            request,
+            world_ref,
+            &actionset_store,
+            &context_fetcher_system_map,
+            &consideration_system_map,
+            &decision_engine_config,
+            &entity_checker,
+            &lod_query,
+            &pawn_query,
+            &utility_curve_registry,
+            &no_match_strategy_config,
+            &mut commands,
+        );
+    }
+}
+
+/// This is the actual logic the Decision Engine runs for each request, factored out 
+/// to keep the thing from becoming too much of a behemoth. This is NOT a proper System, 
+/// this is a plain old function that is called by a System.
+fn run_decision_for_request(    
+    event: &AiDecisionRequestedMessage,
+    world_ref: &World, 
+    actionset_store: &Res<ActionSetStore>,
+    context_fetcher_system_map: &Res<ContextFetcherKeyToSystemMap>,
+    consideration_system_map: &Res<ConsiderationKeyToSystemMap>,
+    decision_engine_config: &Res<DecisionEngineConfig>,
+    entity_checker: &Query<Entity, With<AIController>>, 
+    lod_query: &Query<Option<&AILevelOfDetail>>, 
+    pawn_query: &Query<Option<&Pawn>>,
+    utility_curve_registry: &Option<Res<UtilityCurveRegistry>>,
+    no_match_strategy_config: &Option<Res<NoCurveMatchStrategyConfig>>,
+    commands: &mut Commands,
+) {
     #[cfg(feature = "logging")]
     bevy::log::debug!(
-        "AiDecisionInitiated Event fired, running Decision Engine for Entity {} (Request: {:?})", 
+        "decision_engine: Running Decision Engine for Entity {} (Request: {:?})", 
         event.entity,
         event.request_key,
     );
-    // Marks that SOMEONE has done some AI processing in this world-loop tick. 
-    // This is currently mainly used to disable unnecessary duplicate reinits 
-    // until the next time some AI decides to run and will actually use them.
-    commands.trigger(SomeAiDecisionProcessed);
 
-    let audience = event.event_target();
+    let audience = event.entity;
 
     let exist_check = entity_checker.get(audience);
+
     if exist_check.is_err() {
         // Early termination - the AI the decision was requested for either got despawned or the request 
         // was malformed and was pointed at something that was not an AI in the first place.
         #[cfg(feature = "logging")]
         bevy::log::debug!("decision_engine: Decision request target {:?} is not an AI - ignoring the request.", audience);
+        
         commands.write_message(
             NoDecisionMessage {
                 entity: Some(event.entity),
                 request_key: event.request_key,
-                comment: Some("Target is not an AI!\0"),
+                comment: Some("decision_engine: Target is not an AI!\0"),
             }
         );
         return;
@@ -213,7 +229,7 @@ pub fn decision_engine(
             NoDecisionMessage {
                 entity: Some(event.entity),
                 request_key: event.request_key,
-                comment: Some("Target LOD is below the processing threshold.\0"),
+                comment: Some("decision_engine: Target LOD is below the processing threshold.\0"),
             }
         );
         return;
@@ -223,10 +239,6 @@ pub fn decision_engine(
     // If any batch Score dips below this, we can discard the whole batch immediately 
     // as it cannot possibly beat the current best.
     let mut best_scoring_triple: Option<(ActionScore, ActionTemplateRef, ActionContextRef)> = None;
-
-    // Best score reached for this ActionTemplate
-    // This is a bit more 'local' than the per-AI score
-    let mut best_scoring_template: Option<(ActionTemplateRef, ActionScore)> = None;
     
     let maybe_smartobjects = &event.smart_objects;
     let maybe_pawn = pawn_query.get(audience).ok().flatten().cloned();
@@ -242,7 +254,7 @@ pub fn decision_engine(
             commands.write_message(NoDecisionMessage {
                 entity: Some(event.entity),
                 request_key: event.request_key.clone(),
-                comment: Some("Target has no SmartObjects available.\0"),
+                comment: Some("decision_engine: Target has no SmartObjects available.\0"),
             });
             return;
         }
@@ -257,7 +269,10 @@ pub fn decision_engine(
                 actionset_key
                 .as_ref()
                 .as_ref()
-            );
+            ).or_else(|| {
+                bevy::log::warn!("decision_engine: Unrecognized ActionSet key: {actionset_key:?}");
+                None 
+            });
             maybe_act
         }
     )
@@ -298,6 +313,10 @@ pub fn decision_engine(
             );
             continue;
         }
+
+        // Best score reached for this ActionTemplate
+        // This is a bit more 'local' than the per-AI score
+        let mut best_scoring_template: Option<(ActionTemplateRef, ActionScore)> = None;
 
         #[cfg(feature = "logging")]
         bevy::log::debug!(
@@ -551,7 +570,7 @@ pub fn decision_engine(
                             };
 
                             // Only really needed if we don't break on poisoned locks.
-                            res.expect("Consideration failed - lock poisoned!")
+                            res.expect("decision_engine: Consideration failed - lock poisoned!")
                         };
 
                         let raw_score = match run_res {
@@ -602,7 +621,7 @@ pub fn decision_engine(
                             false => {
                                 #[cfg(feature = "logging")]
                                 bevy::log::error!(
-                                    "Min/Max values for Consideration {:?} in Action {:?} 
+                                    "decision_engine: Min/Max values for Consideration {:?} in Action {:?} 
                                     were flipped, min={:?} > max={:?}. 
                                     They have been flipped back so Min<=Max for you for now. 
                                     This fixup is not guaranteed to be in place in future versions of the library!",
@@ -619,7 +638,7 @@ pub fn decision_engine(
                         if true_span == 0. {
                             #[cfg(feature = "logging")]
                             bevy::log::warn!(
-                                "Span of Min/Max values for Consideration {:?} 
+                                "decision_engine: Span of Min/Max values for Consideration {:?} 
                                 in Action {:?} is zero! min={:?}, max={:?}. 
                                 This would result in a division-by-zero and will instead be  
                                 interpreted as a disabled Consideration and ignored. If you did not  
@@ -732,7 +751,7 @@ pub fn decision_engine(
                 false => {
                     #[cfg(feature = "logging")]
                     bevy::log::debug!(
-                        "AI {:?} - Score for Action {:?} = {:?} is below the current best of {:?}. Ignoring.",
+                        "decision_engine: AI {:?} - Score for Action {:?} = {:?} is below the current best of {:?}. Ignoring.",
                         &audience,
                         &action_template.name,
                         prioritized_score,
@@ -742,7 +761,7 @@ pub fn decision_engine(
                 true => {
                     #[cfg(feature = "logging")]
                     bevy::log::debug!(
-                        "AI {:?} - Score for Action {:?} = {:?} beats the current best of {:?}. Promoting to new best.",
+                        "decision_engine: AI {:?} - Score for Action {:?} = {:?} beats the current best of {:?}. Promoting to new best.",
                         &audience,
                         &action_template.name,
                         prioritized_score,
@@ -760,7 +779,7 @@ pub fn decision_engine(
         commands.write_message(NoDecisionMessage {
             entity: Some(event.entity),
             request_key: event.request_key.clone(),
-            comment: Some("Decision Engine run aborted due to a serious error!\0"),
+            comment: Some("decision_engine: Decision Engine run aborted due to a serious error!\0"),
         });
         return;
     }

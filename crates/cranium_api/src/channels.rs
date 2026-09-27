@@ -12,7 +12,7 @@ use cranium_core::bevy::{platform::sync::{OnceLock}};
 use cranium_core::bevy::log;
 use cranium_core::ai::AIController;
 use cranium_core::actions::ActionKey;
-use cranium_core::events::{AiActionPickedEvent, AiDecisionRequested, NoDecisionMessage};
+use cranium_core::events::{AiActionPickedEvent, AiDecisionRequestedMessage, NoDecisionMessage};
 use cranium_core::smart_object::SmartObjects;
 use crossbeam_channel;
 use cranium_ffi::{ApiInMsg, EntityOperation, HostIdType, HostMapped, NativeHostIdType, RequestKey, StagedApiOutMsg};
@@ -309,8 +309,8 @@ pub(crate) fn decision_requested_msg_handler<I: HostIdType + 'static>(
     host_id_registry: Res<HostIdToEntityRegistry<I>>,
     so_query: Query<&SmartObjects, With<AIController>>, 
     mut in_messages: MessageReader<DecisionRequestedMsg<I>>,
+    mut ai_requests: MessageWriter<AiDecisionRequestedMessage>,
     mut failure_messages: MessageWriter<NoDecisionMessage>,
-    mut commands: Commands,
 ) {
     in_messages.read_with_id().for_each(|(msg, msg_id)| {
         host_id_registry
@@ -345,10 +345,12 @@ pub(crate) fn decision_requested_msg_handler<I: HostIdType + 'static>(
                         local_entity,
                         sos.actionset_refs.len()
                     );
-                    commands.trigger(AiDecisionRequested {
+
+                    ai_requests.write(AiDecisionRequestedMessage { 
                         entity: *local_entity,
                         request_key: Some(msg.request_key.clone()),
                         smart_objects: Some(sos.clone()),
+                        pawn: None,
                     });
                 },
 

@@ -15,7 +15,7 @@ The heart of the library. Contains all fundamental AI engine code:
 - **Decision Loop** — The core engine logic that orchestrates the full Utility AI pipeline: gathering available ActionTemplates from SmartObjects, requesting contexts via ContextFetchers, scoring via Considerations, applying curve adjustments and consideration compensation, selecting the highest-scoring action, and dispatching it to the appropriate `ActionHandler`.
 - **SmartObjects** — The Sims-inspired pattern where world objects expose `ActionSets` to AIs, stored in a central `ActionSetStore` resource keyed by name.
 - **LODs (Levels of Detail)** — A performance optimization system allowing AI processing frequency/depth to be reduced for distant or low-priority entities.
-- **Events** — The event types (`AiDecisionRequested`, `AiDecisionInitiated`, `AiActionPickedEvent`, `AiActionDispatchToUserCode`, etc.) that drive the event-reactive decision pipeline.
+- **Events** — The event types (`AiDecisionRequested`, `AiActionPickedEvent`, `AiActionDispatchToUserCode`, etc.) that drive the event-reactive decision pipeline.
 - **Types & Identifiers** — Shared type aliases (`CraniumRwLock`, `CraniumList`, `CraniumKvMap`, `ThreadSafeRef`, etc.) and newtype identifiers for context fetchers, considerations, and curves.
 - **Pawn** — A component linking an `AIController` entity to the actual game entity it drives.
 - **Entity Identifier** — A unified identifier type for entities.

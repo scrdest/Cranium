@@ -6,7 +6,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Assorted Event types used by Cranium.
 
-use bevy::{ecs::message::MessageId, prelude::*};
+use bevy::{ecs::{entity::{EntityHashMap, EntityHashSet}, message::MessageId}, prelude::*};
 use crate::{actions::ActionContext, types::{self, RequestKey}};
 
 /// The core details about the action selection decision. 
@@ -145,12 +145,6 @@ impl AiActionPickedMessage {
     }
 }
 
-/// A more general signal than AiActionPickedEvent - simply signals that SOME AI has 
-/// done some processing. Can drive signals for things like AI Server mode as a 'hey, 
-/// there's some data you might want to pull' signal in the future.
-#[derive(Event, Debug)]
-pub struct SomeAiDecisionProcessed;
-
 /// Supporting Event for triggering a decision_process() for an AI.
 /// 
 /// Should generally NOT be raised more than once per Entity per tick 
@@ -164,6 +158,7 @@ pub struct AiDecisionRequested {
     pub entity: types::AiEntity,
     pub request_key: Option<RequestKey>,
     pub smart_objects: Option<crate::types::SmartObjects>,
+    pub pawn: Option<crate::types::PawnEntity>,
 }
 
 
@@ -177,18 +172,105 @@ pub struct AiDecisionRequested {
 /// From a different angle: within the same tick, a decision request is idempotent.
 #[derive(Message, Clone)]
 pub struct AiDecisionRequestedMessage {
+    /// The AI that should make a decision
     pub entity: types::AiEntity,
+    
+    /// Soft-required: a list of SmartObjects to source Actions from. 
+    /// This CAN be None, but that will almost certainly lead to an empty decision 
+    /// (which can be fine for testing or if your application just doesn't check on its side it has any).
+    pub smart_objects: Option<types::SmartObjects>,
+
+    /// Optional: Correlation key
     pub request_key: Option<RequestKey>,
-    pub smart_objects: Option<crate::types::SmartObjects>,
+
+    /// Optional: The Pawn this request is for. 
+    pub pawn: Option<types::PawnEntity>,
+}
+
+impl AiDecisionRequestedMessage {
+    pub fn new(
+        entity: types:: AiEntity,
+        request_key: Option<RequestKey>,
+        smart_objects: Option<types:: SmartObjects>,
+        pawn: Option<types:: AiEntity>,
+    ) -> Self {
+        Self {
+            entity,
+            request_key,
+            smart_objects,
+            pawn,
+        }
+    }
 }
 
 /// A small auxiliary Resource tracking the global AiDecisionRequestedMessage 'cursor' 
 /// to enable Change Detection-based conditional triggering for downstream systems.
-/// 
-/// 
 #[derive(Debug, Default, Resource)]
 pub struct LastAiDecisionRequested {
     pub id: Option<MessageId<AiDecisionRequestedMessage>>
+}
+
+/// AiDecisionRequestedMessages primarily serve the decision_engine System. 
+/// 
+/// Unfortunately, that System requires a World access.
+/// 
+/// We cannot properly access a MessageReader in a System that takes World 
+/// (as the readers require mutability, and so reading mutates the World... but 
+/// we are holding a World ref that promises to NOT be mutated while we hold it!)
+/// 
+/// So, instead we use this Resource - we drain Messages into it and empty the Vec 
+/// during the maintenance phase of the Cranium schedule.
+#[derive(Default, Resource)]
+pub struct AiDecisionRequestsBuffer {
+    pub buffer: Vec<AiDecisionRequestedMessage>,
+}
+
+pub fn drain_decision_requests_into_buffer(
+    mut reader: MessageReader<AiDecisionRequestedMessage>,
+    mut buffer: ResMut<AiDecisionRequestsBuffer>,
+    mut last_seen: ResMut<LastAiDecisionRequested>,
+) {
+    let mut seen = EntityHashMap::<EntityHashSet>::new();
+
+    for (msg, msg_id) in reader.read_with_id() {
+        // Deduplicate requests (within the same tick) by target
+        let maybe_pawns = seen.get_mut(&msg.entity);
+
+        // We use EntityHash[Map/Set] for these, which are optimized for, well, Entities, 
+        // and not so much for Option<Entity> - so we'll use PLACEHOLDERs as nulls for efficiency.
+        let safe_pawn = msg.pawn.unwrap_or(Entity::PLACEHOLDER);
+
+        if let Some(pawns) = maybe_pawns {
+            match pawns.contains(&safe_pawn) {
+                true => {
+                    bevy::log::debug!("drain_decision_requests_into_buffer: Skipping duplicate decision request for Entity {:?}", msg.entity);
+                    continue
+                },
+                false => {
+                    // We have seen this Entity, but not this (Entity, Pawn) combo.
+                    // Just update the Pawns seen for this Entity.
+                    pawns.insert(safe_pawn);
+                }
+            }
+        } else {
+            // Completely novel Entity, mint a new key AND new pawn set
+            seen.insert(msg.entity, EntityHashSet::from([safe_pawn]));
+        }
+        
+        bevy::log::debug!("drain_decision_requests_into_buffer: Drained message {msg_id:?} into buffer...");
+        buffer.buffer.push(msg.clone());
+        last_seen.id = Some(msg_id);
+    }
+}
+
+pub fn cleanup_decision_requests_buffer(
+    mut buffer: ResMut<AiDecisionRequestsBuffer>,
+) {
+    let bufsize = buffer.buffer.len();
+    if bufsize > 0 {
+        bevy::log::debug!("cleanup_decision_requests_buffer: Dropping the stale decision requests buffer ({} messages).", buffer.buffer.len());
+        buffer.buffer.clear();
+    }
 }
 
 /// Compatibility bridge for callers still raising the EntityEvent form.
@@ -205,20 +287,8 @@ pub fn bridge_decision_request_event(
         entity: e.entity,
         request_key: e.request_key.clone(),
         smart_objects: e.smart_objects.clone(),
+        pawn: on.pawn.clone(),
     });
-}
-
-
-/// Supporting Event for triggering a decision_process() for an AI.
-/// Raised when AiDecisionRequested has finished preparing the AI.
-/// 
-/// Should generally NOT be raised more than once per Entity per tick 
-/// or you are likely running the same calculation multiple times.
-#[derive(EntityEvent)]
-pub struct AiDecisionInitiated {
-    pub entity: types::AiEntity,
-    pub request_key: Option<RequestKey>,
-    pub smart_objects: Option<crate::types::SmartObjects>,
 }
 
 

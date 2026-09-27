@@ -234,6 +234,7 @@ fn setup_example_entity(
         entity: ai_id,  
         request_key: None, 
         smart_objects: Some(new_sos),
+        pawn: None,
     });
 }
 

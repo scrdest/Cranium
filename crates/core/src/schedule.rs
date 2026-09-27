@@ -30,6 +30,9 @@ pub enum CraniumSet {
     /// Where decision requests are raised.
     Request,
 
+    /// Where the decisions actually get made.
+    Process,
+
     /// ActionHandlers fire; picked actions become host intents.
     Dispatch,
 
@@ -59,6 +62,7 @@ impl Plugin for CraniumScheduleStagesPlugin {
             (
                 CraniumSet::Preflights,
                 CraniumSet::Request,
+                CraniumSet::Process,
                 CraniumSet::Dispatch,
                 CraniumSet::Maintain,
             )

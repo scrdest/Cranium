@@ -12,7 +12,7 @@ use cranium_core::action_state;
 use cranium_core::considerations;
 use cranium_core::context_fetchers;
 use cranium_core::decision_loop;
-use cranium_core::events::AiActionPickedMessage;
+use cranium_core::events;
 use cranium_core::schedule;
 use cranium_core::smart_object;
 
@@ -223,12 +223,39 @@ impl Plugin for CraniumPlugin {
         .init_resource::<action_runtime::UserDefaultActionTrackerSpawnConfig>()
         .init_resource::<smart_object::ActionSetStore>()
         .init_resource::<decision_loop::DecisionEngineConfig>()
+        .init_resource::<events::AiDecisionRequestsBuffer>()
+        .init_resource::<events::LastAiDecisionRequested>()
 
-        .add_message::<AiActionPickedMessage>()
-        .add_message::<cranium_core::events::AiActionDispatchToUserCode>()
+        .add_message::<events::AiActionPickedMessage>()
+        .add_message::<events::AiDecisionRequestedMessage>()
+        .add_message::<events::AiActionDispatchToUserCode>()
+        .add_observer(events::bridge_decision_request_event)
+        
+        .add_systems(
+            FixedUpdate, 
+            (
+                events::drain_decision_requests_into_buffer,
+            )
+            .in_set(schedule::CraniumSet::Request)
+        )
 
-        .add_observer(decision_loop::prepare_ai)
-        .add_observer(decision_loop::decision_engine)
+        .add_systems(
+            FixedUpdate, 
+            (
+                decision_loop::decision_engine,
+            )
+            .in_set(schedule::CraniumSet::Process)
+            .run_if(resource_changed::<events::LastAiDecisionRequested>)
+        )
+
+        .add_systems(
+            FixedUpdate, 
+            (
+                events::cleanup_decision_requests_buffer
+            )
+            .in_set(schedule::CraniumSet::Maintain)
+            .run_if(resource_changed::<events::LastAiDecisionRequested>)
+        )
         ;
 
         if self.include_actiontracker_dispatch {
