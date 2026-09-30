@@ -29,11 +29,19 @@ mod std_types {
 
     /// A standardized Cranium type for key-value maps (generally hashmaps; HashMap or equivalent)
     pub type CraniumKvMap<K, V> = bevy::platform::collections::HashMap<K, V>;
+
+    /// A standardized Cranium type for Copy-on-Write pointers
+    pub type CraniumCow<'a, T> = std::borrow::Cow<'a, T>;
+
+    /// The actual key (not type marker) for ReflectMaps. 
+    pub type ReflectMapKey = CraniumCow<'static, str>;
 }
 
 #[cfg(all(any(feature = "nostd_support")))]
 mod nostd_types {
     //! std-free implementations 
+    extern crate alloc;
+
     /// A standardized Cranium type for Read-Write Locks (i.e. std::sync::RwLock<T> or similar)
     pub type CraniumRwLock<T> = bevy::platform::sync::RwLock<T>;
 
@@ -46,6 +54,12 @@ mod nostd_types {
 
     /// A standardized Cranium type for key-value maps (generally hashmaps; HashMap or equivalent)
     pub type CraniumKvMap<K, V> = bevy::platform::collections::HashMap<K, V>;
+
+    /// A standardized Cranium type for Copy-on-Write pointers
+    pub type CraniumCow<'a, T> = alloc::borrow::Cow<'a, T>;
+
+    /// The actual key (not type marker) for ReflectMaps. 
+    pub type ReflectMapKey = CraniumCow<'static, str>;
 }
 
 // If nostd_support is enabled, it takes precedence over std. 

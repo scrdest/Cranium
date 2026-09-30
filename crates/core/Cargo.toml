@@ -11,6 +11,7 @@ repository = "https://github.com/scrdest/Cranium"
 [dependencies]
 bevy = { version = ">=0.19.0, <0.20.0", default-features = false, features = ["bevy_animation"]}
 serde = { version = "1.0.219", features = ["derive"], optional = true}
+serde_json = { version = "1.0.141", optional = true}
 
 [dev-dependencies]
 bevy = { version = ">=0.19.0, <0.20.0", default-features = false, features = [
@@ -20,12 +21,19 @@ bevy = { version = ">=0.19.0, <0.20.0", default-features = false, features = [
 ]}
 
 [features]
-default = ["std"]
+default = ["std", "reflectmap_persistence"]
 
 # Provides a way to load ActionSets as Assets from the filesystem.
 actionset_loader = [
     "dep:serde", 
     "bevy/bevy_asset",
+    "bevy/serialize",
+]
+
+# Provides a way to load ActionSets as Assets from the filesystem.
+reflectmap_persistence = [
+    "dep:serde", 
+    "dep:serde_json", 
     "bevy/serialize",
 ]
 

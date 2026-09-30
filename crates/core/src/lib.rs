@@ -27,6 +27,7 @@ pub mod lods;
 // pub mod memories;
 pub mod pawn;
 pub mod reinit;
+pub mod reflectmap;
 pub mod schedule;
 // pub mod senses;
 pub mod smart_object;
