@@ -243,6 +243,7 @@ pub fn drain_decision_requests_into_buffer(
         if let Some(pawns) = maybe_pawns {
             match pawns.contains(&safe_pawn) {
                 true => {
+                    #[cfg(feature = "logging")]
                     bevy::log::debug!("drain_decision_requests_into_buffer: Skipping duplicate decision request for Entity {:?}", msg.entity);
                     continue
                 },
@@ -257,6 +258,7 @@ pub fn drain_decision_requests_into_buffer(
             seen.insert(msg.entity, EntityHashSet::from([safe_pawn]));
         }
         
+        #[cfg(feature = "logging")]
         bevy::log::debug!("drain_decision_requests_into_buffer: Drained message {msg_id:?} into buffer...");
         buffer.buffer.push(msg.clone());
         last_seen.id = Some(msg_id);
@@ -268,6 +270,7 @@ pub fn cleanup_decision_requests_buffer(
 ) {
     let bufsize = buffer.buffer.len();
     if bufsize > 0 {
+        #[cfg(feature = "logging")]
         bevy::log::debug!("cleanup_decision_requests_buffer: Dropping the stale decision requests buffer ({} messages).", buffer.buffer.len());
         buffer.buffer.clear();
     }
@@ -422,9 +425,9 @@ mod tests {
     fn handle_event(
         trigger: On<TestActionEvent>
     ) {
-        let evt = trigger.event();
+        let _evt = trigger.event();
         #[cfg(feature = "logging")]
-        bevy::log::debug!("Processing event {:?}", evt);
+        bevy::log::debug!("Processing event {:?}", _evt);
     }
 
     #[test]

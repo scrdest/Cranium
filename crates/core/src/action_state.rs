@@ -133,13 +133,13 @@ pub fn action_state_update_handler(
         let maybe_tracker_state = tracker_state_qry.get_mut(msg.entity);
 
         match maybe_tracker_state {
-            Err(err) => {
+            Err(_err) => {
                 #[cfg(feature = "logging")]
-                bevy::log::debug!("{:?}: ActionTracker does not exist: {:?}", &msg.action, err);
+                bevy::log::debug!("{:?}: ActionTracker does not exist: {:?}", &msg.action, _err);
                 match commands.get_entity(msg.entity) {
-                    Err(err) => {
+                    Err(_err) => {
                         #[cfg(feature = "logging")]
-                        bevy::log::error!("{:?}: AI {:?} does not exist??? - {:?}", &msg.action, msg.entity, err);
+                        bevy::log::error!("{:?}: AI {:?} does not exist??? - {:?}", &msg.action, msg.entity, _err);
                     }
                     Ok(mut cmds) => {
                         #[cfg(feature = "logging")]

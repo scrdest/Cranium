@@ -9,6 +9,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use core::borrow::Borrow;
 
 use bevy::prelude::*;
+use bevy::tasks::ParallelSlice;
 
 use crate::actions;
 use crate::ai::{AIController};
@@ -147,24 +148,67 @@ pub fn decision_engine(
     pawn_query: Query<Option<&Pawn>>,
     utility_curve_registry: Option<Res<UtilityCurveRegistry>>,
     no_match_strategy_config: Option<Res<NoCurveMatchStrategyConfig>>,
-    mut commands: Commands,
+    parallel_commands: ParallelCommands,
 ) {
-    for request in requests.read() {
-        // Factored out the per-request logic to a separate function:
-        run_decision_for_request(
-            request,
-            world_ref,
-            &actionset_store,
-            &context_fetcher_system_map,
-            &consideration_system_map,
-            &decision_engine_config,
-            &entity_checker,
-            &lod_query,
-            &pawn_query,
-            &utility_curve_registry,
-            &no_match_strategy_config,
-            &mut commands,
-        );
+    let maybe_thread_pool = bevy::tasks::ComputeTaskPool::try_get();
+
+    match maybe_thread_pool {
+        Some(thread_pool) => {
+            #[cfg(feature = "logging")]
+            bevy::log::debug!("decision_engine: ComputeTaskPool available, parallelizing...");
+
+            let request_pool: Vec<&AiDecisionRequestedMessage> = requests.read().collect();
+            
+            request_pool.par_splat_map(
+                thread_pool, 
+                None, 
+                |_idx, rq_chunk| {
+                    for request in rq_chunk.iter() {
+                        parallel_commands.command_scope(|mut commands| {
+                            run_decision_for_request(
+                                request,
+                                world_ref,
+                                &actionset_store,
+                                &context_fetcher_system_map,
+                                &consideration_system_map,
+                                &decision_engine_config,
+                                &entity_checker,
+                                &lod_query,
+                                &pawn_query,
+                                &utility_curve_registry,
+                                &no_match_strategy_config,
+                                &mut commands,
+                            );
+                        })
+                    }
+                
+            });
+        }
+
+        None => {
+            #[cfg(feature = "logging")]
+            bevy::log::debug!("decision_engine: ComputeTaskPool unavailable, using sequential path...");
+            
+            parallel_commands.command_scope(|mut commands| {
+                for request in requests.read() {
+                    // Factored out the per-request logic to a separate function:
+                    run_decision_for_request(
+                        request,
+                        world_ref,
+                        &actionset_store,
+                        &context_fetcher_system_map,
+                        &consideration_system_map,
+                        &decision_engine_config,
+                        &entity_checker,
+                        &lod_query,
+                        &pawn_query,
+                        &utility_curve_registry,
+                        &no_match_strategy_config,
+                        &mut commands,
+                    );
+                }
+            })
+        }
     }
 }
 
@@ -270,6 +314,7 @@ fn run_decision_for_request(
                 .as_ref()
                 .as_ref()
             ).or_else(|| {
+                #[cfg(feature = "logging")]
                 bevy::log::warn!("decision_engine: Unrecognized ActionSet key: {actionset_key:?}");
                 None 
             });
@@ -362,7 +407,7 @@ fn run_decision_for_request(
                     res.expect("decision_engine: ContextFetcher lock guard errored out without aborting - this should not be possible!")
                 };
 
-                if let Err(err) = entity_res {
+                if let Err(_err) = entity_res {
                     // If we got here, the error comes from a ContextFetcher.
                     // That means it's bad (user needs to fix their code), but not fatal 
                     // (other CFs can happily keep running; even this one may work for
@@ -373,7 +418,7 @@ fn run_decision_for_request(
                         "decision_engine: AI {:?} - ContextFetcher '{:?}' errored: {:?}", 
                         &audience, 
                         &action_template.context_fetcher_name, 
-                        &err,
+                        &_err,
                     );
 
                     continue;

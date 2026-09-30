@@ -194,14 +194,15 @@ pub fn reinit_cf_queries(world: &mut World) {
     //         and we are the only ones with a lock on the initialized System.
     //         We only really need this to bypass a silly borrow-check on the reference.
     unsafe {
-        for (key, sys) in cfs {
+        for (_key, sys) in cfs {
             match sys.write() {
                 Ok(mut s) => { 
                     s.initialize(cell.world_mut()); 
                 }
 
-                Err(e) => { 
-                    bevy::log::error!("CF {:?} lock poisoned, skipping ({:?})", key, e); 
+                Err(_e) => { 
+                    #[cfg(feature = "logging")]
+                    bevy::log::error!("CF {:?} lock poisoned, skipping ({:?})", _key, _e); 
                 }
             }
         }

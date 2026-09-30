@@ -45,26 +45,28 @@ pub fn reinit_registries(world: &mut World) {
     // SAFETY: exclusive system - sole World access, and each System is locked
     // exclusively before we initialize it.
     unsafe {
-        for (key, sys) in cfs {
+        for (_key, sys) in cfs {
             match sys.write() {
                 Ok(mut s) => { 
                     s.initialize(cell.world_mut()); 
                 }
 
-                Err(e) => { 
-                    bevy::log::error!("CF {:?} lock poisoned, skipping ({:?})", key, e); 
+                Err(_e) => { 
+                    #[cfg(feature = "logging")]
+                    bevy::log::error!("CF {:?} lock poisoned, skipping ({:?})", _key, _e); 
                 }
             }
         }
 
-        for (key, sys) in cons {
+        for (_key, sys) in cons {
             match sys.write() {
                 Ok(mut s) => { 
                     s.initialize(cell.world_mut()); 
                 }
                 
-                Err(e) => { 
-                    bevy::log::error!("Consideration {:?} lock poisoned, skipping ({:?})", key, e); 
+                Err(_e) => { 
+                    #[cfg(feature = "logging")]
+                    bevy::log::error!("Consideration {:?} lock poisoned, skipping ({:?})", _key, _e); 
                 }
             }
         }
