@@ -18,6 +18,19 @@ pub enum CaptureError {
     ValueTypeMismatch { key: String, expected: &'static str, found: String },
 }
 
+/// Scans the input [`ReflectMap`] into a new [`ReflectMapSave`] struct that 
+/// can be safely SerDe'd into a storage-friendly format and back. 
+/// 
+/// This is effectively a Clone operation into a persistent format; it does not 
+/// consume the captured ReflectMap but merely snapshots it at a point in time.
+/// 
+/// This is a fallible operation and so it returns a Result. The potential errors generally 
+/// come from missing registrations, failed serialization, or unexpected types being stored.
+/// 
+/// The generic type `SV` determines the storage backend type; it's generally expected to be 
+/// [`serde_json::Value`] or something that behaves broadly similarly to it.
+/// 
+/// See also [`super::rehydrate::rehydrate_map`], which is the dual of this function.
 pub fn capture_map<SV: ReflectMapStorageValue>(
     map: &ReflectMap,
     markers: &ReflectMapMarkerRegistry,
@@ -26,14 +39,19 @@ pub fn capture_map<SV: ReflectMapStorageValue>(
     let mut entries = Vec::with_capacity(map.entries.len());
 
     for ((typepath, key), value) in map.iter_raw() {
-        let info = markers.by_typepath.get(typepath)
-            .ok_or(CaptureError::MarkerNotRegistered { name: "<unknown>" })?;
+        let info = markers.by_typepath
+            .get(typepath)
+            .ok_or(CaptureError::MarkerNotRegistered { name: "<unknown>" })?
+        ;
 
         // Integrity: the stored value must match the marker's declared shape.
         let found = value.reflect_type_path().to_string();
+
         if value.as_any().type_id() != info.value_type_id {
             return Err(CaptureError::ValueTypeMismatch {
-                key: key.to_string(), expected: info.value_type_path, found,
+                key: key.to_string(), 
+                expected: info.value_type_path, 
+                found,
             });
         }
 
@@ -43,6 +61,7 @@ pub fn capture_map<SV: ReflectMapStorageValue>(
                 |e| {
                     #[cfg(feature = "logging")]
                     bevy::log::error!("{:?}", e);
+
                     CaptureError::Serialize { 
                         key: key.to_string(), 
                         source: format!("{:?}", e)
@@ -58,10 +77,13 @@ pub fn capture_map<SV: ReflectMapStorageValue>(
         });
     }
 
-    // I8 — sorted projection [1][3]. The marker is part of the sort key because
+    // Sorted projection for determinism. The marker is part of the sort key because
     // the same name under two markers is a legitimate, distinct entry.
     entries.sort_by(|a, b| {
-        a.marker.cmp(&b.marker).then_with(|| a.key.cmp(&b.key)).then_with(|| a.type_path.cmp(&b.type_path))
+        a.marker
+            .cmp(&b.marker)
+            .then_with(|| a.key.cmp(&b.key))
+            .then_with(|| a.type_path.cmp(&b.type_path))
     });
 
     Ok(ReflectMapSave { entries })

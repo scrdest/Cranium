@@ -28,6 +28,7 @@ impl ReflectMapStorageValue for serde_json::Value {
 }
 
 
+/// A single row of a [`ReflectMapSave`].
 /// One persisted slot. Three-part identity: marker, name, concrete value type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReflectMapEntrySave<SV: ReflectMapStorageValue> {
@@ -47,9 +48,14 @@ pub struct ReflectMapEntrySave<SV: ReflectMapStorageValue> {
     pub value: SV,
 }
 
+/// A SerDe-friendly representation of a [`super::ReflectMap`]. 
+/// 
+/// The data is flattened into a [`Vec`] of [`ReflectMapEntrySave`], 
+/// which are little more than (typekey, slotkey, value) triples from 
+/// the [`super::ReflectMap`], perhaps with a sprinkle of metadata on top.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReflectMapSave<SV: ReflectMapStorageValue> {
-    /// Sorted by `(marker, key, type_path)` on capture — I8 [1][3].
+    // Sorted by `(marker, key, type_path)` on capture.
     pub entries: Vec<ReflectMapEntrySave<SV>>,
 }
 
@@ -67,7 +73,7 @@ mod test {
     use super::*;
     use crate::reflectmap::ReflectMap;
     use crate::reflectmap::persistence::capture::{capture_map};
-    use crate::reflectmap::persistence::rehydrate::{RehydrateReport, rehydrate_map};
+    use crate::reflectmap::persistence::rehydrate::{RehydrateReport, rehydrate_map_with_new_report};
     use crate::reflectmap::registry::{ReflectMapMarkerRegistry};
     use crate::reflectmap::test::*;
 
@@ -107,8 +113,7 @@ mod test {
         let json = serde_json::to_string(&save).expect("serialize");
         let loaded: ReflectMapSave<serde_json::Value> = serde_json::from_str(&json).expect("parse");
 
-        let mut report = RehydrateReport::default();
-        let restored = rehydrate_map(&loaded, markers, registry, &mut report);
+        let (restored, report) = rehydrate_map_with_new_report(&loaded, markers, registry);
         assert_clean(&report);
         restored
     }
@@ -188,7 +193,7 @@ mod test {
                     "actor" => map.insert::<ActorSlot>(key(name), AgentHandle(1)),
                     "enemy" => map.insert::<EnemyOneSlot>(key(name), AgentHandle(2)),
                     other => panic!("unknown fixture slot {other}"),
-                }
+                };
             }
             let save = capture_map::<serde_json::Value>(&map, &markers, &registry).expect("capture");
             serde_json::to_string(&save).expect("serialize")
@@ -227,8 +232,7 @@ mod test {
         lean.register::<AgentHandle>();
         lean.register::<Vec<AgentHandle>>();
 
-        let mut report = RehydrateReport::default();
-        let restored = rehydrate_map(&save, &markers, &lean, &mut report);
+        let (restored, report) = rehydrate_map_with_new_report(&save, &markers, &lean);
 
         assert_eq!(
             restored.get::<ActorSlot>("actor".into()),
@@ -253,8 +257,7 @@ mod test {
         let mut lean_markers = ReflectMapMarkerRegistry::default();
         lean_markers.register::<EnemyManySlot>();
 
-        let mut report = RehydrateReport::default();
-        let restored = rehydrate_map(&save, &lean_markers, &registry, &mut report);
+        let (restored, report) = rehydrate_map_with_new_report(&save, &lean_markers, &registry);
 
         assert!(restored.entries.is_empty());
         assert_eq!(report.unknown_markers, vec!["ActorSlot".to_string()]);
@@ -277,8 +280,7 @@ mod test {
             &registry,
         );
 
-        let mut report = RehydrateReport::default();
-        let restored = rehydrate_map(&save, &markers, &registry, &mut report);
+        let (restored, report) = rehydrate_map_with_new_report(&save, &markers, &registry);
 
         assert!(restored.entries.is_empty());
         assert_eq!(
@@ -299,8 +301,7 @@ mod test {
 
         let lean = TypeRegistry::default(); // knows nothing, not even AgentHandle
 
-        let mut report = RehydrateReport::default();
-        let restored = rehydrate_map(&save, &markers, &lean, &mut report);
+        let (restored, report) = rehydrate_map_with_new_report(&save, &markers, &lean);
 
         assert!(restored.entries.is_empty());
         assert_eq!(report.unknown_types.len(), 1);

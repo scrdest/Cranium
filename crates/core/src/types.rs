@@ -12,6 +12,7 @@ You can obtain one at https://mozilla.org/MPL/2.0/.
 use bevy::platform::prelude::String;
 
 pub use crate::thread_safe_wrapper::ThreadSafeRef;
+pub use crate::reflectmap::{ReflectMap, ReflectMapTypeMarker};
 
 #[cfg(all(feature = "std", not(feature = "nostd_support")))]
 mod std_types {

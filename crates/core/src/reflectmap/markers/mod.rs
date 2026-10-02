@@ -18,6 +18,7 @@
 //! This is exposed as a Bevy Plugin, so you can opt-out of having these registered if, 
 //! for whatever reason, you do not want to have them defined in your application.
 
+use bevy::app::{App, Plugin};
 use bevy::{platform::prelude::*, reflect::TypePath};
 use crate::reflectmap::registry::RegisterReflectMapMarker;
 use crate::reflectmap::runtime::ReflectMapTypeMarker;
@@ -26,9 +27,9 @@ use crate::types::*;
 macro_rules! cranium_builtin_simple_type_marker {
     ($typename:ident, $ty:ty) => {
         #[doc = concat!(
-            "A ReflectMap type marker indicating the associated stored value is of type `", 
+            "A ReflectMap type marker indicating the associated stored value is of type [`", 
             stringify!($ty),
-            "`. Its `ReflectMapMarkerRegistry` name is `",
+            "`]. Its [`ReflectMapMarkerRegistry`] name is `",
             concat!("Cranium", stringify!($typename)),
             "`. ",
         )]
@@ -63,10 +64,18 @@ cranium_builtin_simple_type_marker!{StringMarker, String}
 cranium_builtin_simple_type_marker!{CraniumCowStrMarker, CraniumCow<'static, str>}
 
 
+/// A [`Plugin`] that registers a wide array of [`ReflectMapTypeMarker`]s for 
+/// common simple Rust types for you into your [`App`].
+/// 
+/// This includes all stable signed and unsigned integers including [`usize`]/[`isize`], 
+/// [`f32`] and [`f64`], [`bool`], [`()`], [`CraniumCow`] strings and regular [`String`]s.
+/// 
+/// To use, simply add with [`App::add_plugins()`] in your Bevy app build 
+/// (or inside another Bevy [`Plugin`]).
 pub struct BasicReflectTypemarkersPlugin;
 
-impl bevy::app::Plugin for BasicReflectTypemarkersPlugin {
-    fn build(&self, app: &mut bevy::app::App) {
+impl Plugin for BasicReflectTypemarkersPlugin {
+    fn build(&self, app: &mut App) {
         app
         .register_map_marker::<UnitMarker>()
         .register_map_marker::<BoolMarker>()

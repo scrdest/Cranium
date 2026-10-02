@@ -30,12 +30,18 @@ actionset_loader = [
     "bevy/serialize",
 ]
 
-# Provides a way to load ActionSets as Assets from the filesystem.
+# Enables saving/loading ReflectMap types
 reflectmap_persistence = [
     "dep:serde", 
     "dep:serde_json", 
     "bevy/serialize",
 ]
+
+# Switches ReflectMaps to use the user-defined NAME value as the type marker key, 
+# rather than using the typepath (which is the default). Using NAMEs runs the risk 
+# of key collisions with NAMEs defined elsewhere in your code, but on the flipside, 
+# buys you a guarantee that the keys won't change even if you refactor your code.
+reflectmap_keys_by_name_const = []
 
 std = ["bevy/std"]
 debug = ["bevy/debug"]

@@ -1,6 +1,7 @@
 use bevy::reflect::TypeRegistry;
 use bevy::reflect::serde::ReflectDeserializer;
 use bevy::{prelude::*};
+use serde::{Serialize, Deserialize};
 use serde::Deserializer;
 use serde::de::DeserializeSeed;
 
@@ -9,7 +10,13 @@ use crate::reflectmap::registry::ReflectMapMarkerRegistry;
 use crate::reflectmap::runtime::*;
 use crate::reflectmap::persistence::*;
 
-#[derive(Debug, Default)]
+/// A container for capturing Stuff Going Wrong with [`ReflectMap`] rehydration as done by 
+/// the [`rehydrate_map`] function and its wrapper siblings.
+/// 
+/// This is effectively little more than a 'lazy log' that is a little bit more machine-readable.
+/// 
+/// The whole thing is also SerDe-able both ways in case you want to save it somewhere.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RehydrateReport {
     /// Type not present in the registry — a CONTENT gap, not corruption.
     pub unknown_types: Vec<String>,
@@ -24,11 +31,24 @@ pub struct RehydrateReport {
     pub invalid: Vec<(String, String)>,
 }
 
+/// Restores a SerDe-ified [`ReflectMapSave`] value to a proper, runtime [`ReflectMap`].
+/// 
+/// The [`ReflectMapSave`] is only borrowed, not consumed - the restored map is effectively 
+/// cloned from the provided SerDe snapshot.
+/// 
+/// See also [`super::capture::capture_map`], which is the dual of this function.
+/// 
+/// If a [`RehydrateReport`] is provided, it will be updated with entries about any rehydration 
+/// failures (in-place). If not, it will be passed through.
+/// 
+/// See also [`rehydrate_map_with_new_report`] which is a convenience method that creates and 
+/// returns the report for you alongside the ReflectMap, or [`rehydrate_map_without_report`] 
+/// if you don't want one at all.
 pub fn rehydrate_map<'a, SV: ReflectMapStorageValue + Deserializer<'a>>(
     save: &ReflectMapSave<SV>,
     markers: &ReflectMapMarkerRegistry,
     registry: &TypeRegistry,
-    report: &mut RehydrateReport,
+    mut report: Option<&mut RehydrateReport>,
 ) -> ReflectMap 
 {
     let mut map = ReflectMap::default();
@@ -36,7 +56,7 @@ pub fn rehydrate_map<'a, SV: ReflectMapStorageValue + Deserializer<'a>>(
     for entry in &save.entries {
         // 1. Marker. Missing = the app forgot to register it; skip this entry.
         let Some(info) = markers.by_name.get(entry.marker.as_str()) else {
-            report.unknown_markers.push(entry.marker.clone());
+            report.as_mut().map(|m| m.unknown_markers.push(entry.marker.clone()));
             continue;
         };
 
@@ -45,7 +65,7 @@ pub fn rehydrate_map<'a, SV: ReflectMapStorageValue + Deserializer<'a>>(
             .get_with_type_path(&entry.type_path)
             .or_else(|| registry.get_with_short_type_path(&entry.type_path))
         else {
-            report.unknown_types.push(entry.type_path.clone());
+            report.as_mut().map(|m| m.unknown_types.push(entry.type_path.clone()));
             continue;
         };
 
@@ -53,35 +73,81 @@ pub fn rehydrate_map<'a, SV: ReflectMapStorageValue + Deserializer<'a>>(
         let deserializer = ReflectDeserializer::new(registry);
         let dynamic: Box<dyn PartialReflect> = match deserializer.deserialize(entry.value.clone()) {
             Ok(v) => v,
-            Err(e) => { report.invalid.push((entry.key.clone(), e.to_string())); continue; }
+            Err(e) => { 
+                report.as_mut().map(|m| m.invalid.push((entry.key.clone(), e.to_string()))); 
+                continue; 
+            }
         };
 
         // 4. Dynamic -> concrete. 
-        //    MANDATORY: the result of deserialization is a DynamicStruct, and try_as_reflect() fails on it.
+        //    MANDATORY: the result of deserialization is a DynamicStruct, 
+        //               and try_as_reflect() fails on it.
         let Some(from_reflect) = reg.data::<ReflectFromReflect>() else {
-            report.invalid.push((entry.key.clone(), "type does not register ReflectFromReflect".into()));
+            report.as_mut().map(|m| m.invalid.push((entry.key.clone(), "type does not register ReflectFromReflect".into())));
             continue;
         };
+
         let concrete: Box<dyn Reflect> = match from_reflect.from_reflect(dynamic.as_partial_reflect()) {
             Some(v) => v,
-            None => { report.invalid.push((entry.key.clone(), "from_reflect returned None".into())); continue; }
+            None => { 
+                report.as_mut().map(|m| m.invalid.push((entry.key.clone(), "from_reflect returned None".into()))); 
+                continue; 
+            }
         };
 
         // 5. Shape check against the marker's declaration. This is where a
         //    pack/save version skew shows up as a diagnosis, not a silent None.
         if concrete.as_any().type_id() != info.value_type_id {
-            report.shape_mismatches.push((
+            report.as_mut().map(|m| m.shape_mismatches.push((
                 entry.key.clone(),
                 info.value_type_path.to_string(),
                 concrete.reflect_type_path().to_string(),
-            ));
+            )));
             continue;
         }
 
         // 6. Insert under the NOW-OWNED key. `Cow::Owned` is the whole reason
         //    the map's key type must be `Cow` and not `&'static str`.
-        map.insert_dyn(info.typepath, CraniumCow::Owned(entry.key.clone()), concrete);
+        let marker_key = cfg_select! {
+            feature = "reflectmap_keys_by_name_const" => { info.name },
+            _ => info.typepath
+        };
+
+        map.insert_dyn(marker_key, CraniumCow::Owned(entry.key.clone()), concrete);
     }
 
     map
+}
+
+/// Restores a SerDe-ified [`ReflectMapSave`] value to a proper, runtime [`ReflectMap`].
+/// 
+/// See [`rehydrate_map`] for details - this is a helper that simplifies the API for handling 
+/// the [`RehydrateReport`] audit reports - it will create a new one for you and return it 
+/// with the ReflectMap result.
+/// 
+/// See also  [`rehydrate_map_without_report`] if you don't want an audit report at all.
+pub fn rehydrate_map_with_new_report<'a, SV: ReflectMapStorageValue + Deserializer<'a>>(
+    save: &ReflectMapSave<SV>,
+    markers: &ReflectMapMarkerRegistry,
+    registry: &TypeRegistry,
+) -> (ReflectMap, RehydrateReport) {
+    let mut report = RehydrateReport::default();
+    let result = rehydrate_map(save, markers, registry, Some(&mut report));
+    (result, report)
+}
+
+/// Restores a SerDe-ified [`ReflectMapSave`] value to a proper, runtime [`ReflectMap`].
+/// 
+/// See [`rehydrate_map`] for details - this is a helper that simplifies the API for handling 
+/// the [`RehydrateReport`] audit reports - it will simply pass in a None value, which ignores 
+/// any steps that would populate the report.
+/// 
+/// See also  [`rehydrate_map_with_new_report`] if you do want an audit report.
+pub fn rehydrate_map_without_report<'a, SV: ReflectMapStorageValue + Deserializer<'a>>(
+    save: &ReflectMapSave<SV>,
+    markers: &ReflectMapMarkerRegistry,
+    registry: &TypeRegistry,
+) -> ReflectMap {
+    let result = rehydrate_map(save, markers, registry, None);
+    result
 }
